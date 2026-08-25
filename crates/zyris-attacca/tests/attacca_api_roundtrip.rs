@@ -884,10 +884,10 @@ async fn works_scopes_are_spelled_the_way_the_wire_spells_them() {
     assert!(ZScope::ALL.contains(&ZScope::WorksWrite));
 }
 
-/// A sibling node: registered under the caller's device, listed without its one-time token. The
+/// A node taken under the caller's device: registered, then listed without its one-time token. The
 /// token is the only thing that must never survive a round trip into a listing.
 #[tokio::test]
-async fn sibling_nodes_round_trip() {
+async fn a_node_taken_under_a_device_round_trips() {
     let api = client().await;
 
     let created = api
@@ -914,19 +914,19 @@ async fn sibling_nodes_round_trip() {
 /// refusal is half of the contract: a node that deleted itself would have to answer down the
 /// connection it just revoked, so the caller could never tell "done" from "the socket died."
 #[tokio::test]
-async fn a_sibling_node_can_be_deleted_but_never_itself() {
+async fn a_node_can_be_given_back_but_never_by_itself() {
     let api = client().await;
 
-    api.delete_node("sibling-1".into()).await.expect("a sibling comes back off the account");
+    api.delete_node("sibling-1".into()).await.expect("a node comes back off the account");
 
     let err = api.delete_node("self".into()).await.expect_err("deleting the caller is refused");
     assert!(err.to_string().contains("cannot delete itself"), "{err}");
 }
 
-/// The scope added alongside the sibling-node tools. `ZScope::ALL` is what a node asks for when it
-/// wants everything, so a scope missing from it is a scope no node ever requests.
+/// The scope added alongside the node tools. `ZScope::ALL` is what a node asks for when it wants
+/// everything, so a scope missing from it is a scope no node ever requests.
 #[tokio::test]
-async fn sibling_node_scope_is_spelled_the_way_the_wire_spells_it() {
+async fn the_node_scope_is_spelled_the_way_the_wire_spells_it() {
     assert_eq!(ZScope::NodesWrite.as_str(), "nodes:write");
     assert_eq!(ZScope::from_str("nodes:write"), Some(ZScope::NodesWrite));
     assert!(ZScope::ALL.contains(&ZScope::NodesWrite));
@@ -1022,4 +1022,66 @@ fn peer_entry_rejects_a_missing_required_field() {
         "online": true,
     });
     assert!(serde_json::from_value::<ZPeerEntry>(missing_endpoint_id).is_err());
+}
+
+/// `doc_string` joins a doc comment's lines with `\n` (`zyris-macros/src/lib.rs:280`), so a phrase
+/// that wraps in the source arrives here split across lines. Flatten before matching.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// These doc comments are not commentary. `#[zyris::capability]` copies each declared method's doc
+/// into `ToolDescriptor::description`, and schemars copies each struct's doc into its schema — so
+/// this text is what a deployment announces and what a model reads before deciding to call.
+///
+/// It described `register_node` as taking "a permanent sibling node … e.g. a per-project zyris-cli
+/// checkout", which was accurate only while a program normally held exactly one node and a second
+/// one was an oddity. A program now takes as many nodes as it has work for, so the description has
+/// to read as the ordinary way to get one.
+#[test]
+fn taking_a_node_is_described_as_ordinary_not_as_a_sibling() {
+    let descriptor = attacca_api_capability();
+
+    let register = one_line(&descriptor.tool("register_node").unwrap().description);
+    assert!(
+        register.contains("Take another node under this node's authenticated device"),
+        "register_node must read as the ordinary way to get a node: {register}"
+    );
+    assert!(!register.contains("sibling"), "{register}");
+    assert!(!register.contains("per-project"), "{register}");
+
+    let delete = one_line(&descriptor.tool("delete_node").unwrap().description);
+    assert!(
+        delete.contains("Give a node back"),
+        "delete_node must read as the counterpart to taking one: {delete}"
+    );
+    assert!(!delete.contains("sibling"), "{delete}");
+
+    // The request struct's own doc rides along in the schema the same way. The one struct
+    // argument comes back as a `$ref`, so the struct's own doc is on its `$defs` entry rather
+    // than on the property that points at it.
+    let request = &descriptor.tool("register_node").unwrap().request_schema;
+    let schema_doc = one_line(
+        request["$defs"]["ZNewNode"]["description"]
+            .as_str()
+            .expect("ZNewNode's doc comment must reach the request schema"),
+    );
+    assert!(!schema_doc.contains("sibling"), "{schema_doc}");
+}
+
+/// `node_id` is the identity a caller stores; `slug` is a label the server may have altered before
+/// handing it back. A client that keyed anything on the slug it asked for would key it on a value
+/// the server is free to disambiguate, and would look up the wrong node the day two machines share
+/// a hostname. The docs have to say so, because nothing in the types does.
+#[test]
+fn the_node_answer_says_which_field_is_the_identity() {
+    let descriptor = attacca_api_capability();
+    let response = descriptor.tool("register_node").unwrap().response_schema.as_ref().unwrap();
+    let props = &response["properties"];
+
+    let node_id = one_line(props["node_id"]["description"].as_str().expect("node_id needs a doc"));
+    assert!(node_id.contains("stable identity"), "{node_id}");
+
+    let slug = one_line(props["slug"]["description"].as_str().expect("slug needs a doc"));
+    assert!(slug.contains("numeric suffix"), "the slug doc must warn it can be altered: {slug}");
 }

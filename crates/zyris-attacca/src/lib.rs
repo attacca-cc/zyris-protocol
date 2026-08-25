@@ -28,7 +28,8 @@ use zyris::{Datum, Streaming};
 pub const ATTACCA_API_CAPABILITY: &str = "attacca_api";
 
 /// What a node's grant may contain — Attacca's scope vocabulary, spelled the way the wire spells
-/// it. A node asks for a subset at enrollment (`Runner::request_scopes`, or `$ZYRIS_SCOPES`), the
+/// it. A node asks for a subset at enrollment (`EnrollRequest::scopes`) and again per node token
+/// (`NodeSpec::scopes`, which the server clamps to the account grant), the
 /// approving user may grant fewer, and `me` reports what was actually granted.
 ///
 /// Every `attacca_api` tool but `me` is scope-checked at call time. The descriptor lists them all
@@ -76,13 +77,13 @@ pub enum ZScope {
     /// stream, because a caller cannot tell "nothing happened" from "you weren't allowed to see it".
     #[serde(rename = "events:read")]
     EventsRead,
-    /// Register and list nodes under the caller's own authenticated device — the per-auth
-    /// management surface a machine that owns a device grant uses to mint sibling nodes.
+    /// Register and list nodes under the caller's own authenticated device — the management
+    /// surface a program that owns a device grant uses to take as many nodes as it has work for.
     #[serde(rename = "nodes:write")]
     NodesWrite,
     /// P2P rendezvous between nodes on the same account — publish this node's own address and ask
-    /// for a sibling's. The file itself never passes through Attacca, so what this scope opens is
-    /// **the address book only**.
+    /// for another node's. The file itself never passes through Attacca, so what this scope opens
+    /// is **the address book only**.
     #[serde(rename = "peers:write")]
     PeersWrite,
 }
@@ -645,10 +646,11 @@ pub enum ZTurnFrame {
     Status { running: bool },
 }
 
-/// What [`AttaccaApi::register_node`] takes: a permanent sibling node under the caller's own
-/// authenticated device — another agent of the same computer, e.g. a per-project zyris-cli
-/// checkout on the machine that already owns a device grant. The node's scopes are clamped
-/// server-side to the caller's own grant.
+/// What [`AttaccaApi::register_node`] takes. A device grant is one credential; the nodes taken
+/// under it are as many identities as the holder has work for — one per checkout, per window, per
+/// long-running job. Taking another is the ordinary way a program gets a node, not a special case,
+/// and [`AttaccaApi::delete_node`] gives one back. The node's scopes are clamped server-side to
+/// the caller's own grant.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ZNewNode {
     /// Display name; the server slugs it for the tool namespace like any node's.
@@ -661,11 +663,20 @@ pub struct ZNewNode {
     pub scopes: Vec<String>,
 }
 
-/// A node registered under the caller's device, as the server reports it.
+/// A node under the caller's authenticated device, as the server reports it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ZNode {
+    /// **The stable identity.** Store this and address the node by it: it is what
+    /// [`AttaccaApi::delete_node`] takes, and it never changes for the life of the node.
     pub node_id: String,
+    /// Display name. May not be the name that was asked for — see `slug`.
     pub name: String,
+    /// A display convenience derived from `name`, and the namespace the node's tools appear under.
+    /// **Not an identity.** Two machines volunteering the same hostname is ordinary, so the server
+    /// may hand back a slug (and name) it disambiguated with a numeric suffix — `build-box`,
+    /// `build-box-2`. It is also capped in length, so a long name comes back truncated. Read it
+    /// back off this answer rather than assuming the one that was requested, and never key stored
+    /// state on it.
     pub slug: String,
     /// `linux` / `windows` / `macos` / `cli` / `other`.
     pub platform: String,
@@ -683,7 +694,7 @@ pub struct ZNode {
     pub created_at: Option<String>,
 }
 
-/// A sibling node's iroh address, as [`AttaccaApi::peer_lookup`] answers it.
+/// Another node's iroh address, as [`AttaccaApi::peer_lookup`] answers it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ZPeerAddr {
     pub node_id: String,
@@ -880,23 +891,26 @@ pub trait AttaccaApi {
         after: Option<i64>,
     ) -> zyris::Result<Streaming<ZTurnStatus, ZTurnFrame>>;
 
-    /// Register a permanent sibling node under this node's authenticated device — another agent of
-    /// the same computer, e.g. a per-project zyris-cli checkout on a machine that already owns a
-    /// device grant. The new node dials with its own static `znt_` token (shown once, never
-    /// retrievable again) and groups under the same device in the dashboard.
+    /// Take another node under this node's authenticated device. A program holding a device grant
+    /// takes as many nodes as it needs — one per checkout, per window, per job it wants to keep
+    /// separately addressable — and this is the ordinary way to get each of them. The new node
+    /// dials with its own static `znt_` token, returned once on this answer and never retrievable
+    /// again, and groups under the same device in the dashboard.
     ///
     /// Requires the `nodes:write` scope, and the node's scopes are clamped to this node's own
-    /// grant — it cannot be minted with more power than its creator holds.
+    /// grant — it cannot be taken with more reach than the credential that took it.
+    ///
+    /// Read `slug` back off the answer: it may differ from the name that was asked for.
     async fn register_node(&self, request: ZNewNode) -> zyris::Result<ZNode>;
 
     /// List the nodes registered under this node's authenticated device. Requires `nodes:write`;
     /// never includes a token.
     async fn list_nodes(&self) -> zyris::Result<Vec<ZNode>>;
 
-    /// Remove a sibling node registered under this node's authenticated device, revoking its
-    /// token. **The counterpart to [`AttaccaApi::register_node`]** — without it, every node a
-    /// program registers is permanent, and a client that registers one per window has no way to
-    /// tidy up after itself. Requires `nodes:write`.
+    /// Give a node back, revoking its token. **The counterpart to
+    /// [`AttaccaApi::register_node`]** — without it every node a program takes is permanent, and a
+    /// program that takes one per window has no way to tidy up after itself. Takes the `node_id`
+    /// from the register answer, not the slug. Requires `nodes:write`.
     ///
     /// **A node cannot delete itself.** The answer would have to travel back down a connection the
     /// deletion just revoked, so the caller could never tell the difference between "done" and
