@@ -17,10 +17,15 @@ worked example.
 
 ## 0. Writing a node
 
-`crates/zyris-hello` is a complete, runnable node in two short files — one capability with one
-tool, plus the connect/reconnect loop and the consume side. Start there; this document is the
-normative wire reference, not a tutorial. See `crates/zyris-hello/README.md` for how to run it
-against a local server.
+`crates/zyris/examples/hello.rs` is a complete, runnable node in one file — one capability with
+one tool, plus enrollment, node registration and the connection. Start there; this document is the
+normative wire reference, not a tutorial. Run it with
+
+```bash
+cargo run -p zyris --example hello --features enroll
+```
+
+and point it at a local server with `ZYRIS_SERVER_URL`.
 
 ## 1. Transport and framing
 

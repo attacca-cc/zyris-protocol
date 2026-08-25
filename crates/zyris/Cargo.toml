@@ -38,7 +38,8 @@ p2p = ["dep:zyris-p2p"]
 
 # Every layer this crate has a module for, plus enrollment. **The reference implementations are not
 # one of them**: they are unpublished on purpose, so a node that wants `PtyTerminal` or
-# `LocalFileIo` names that crate directly out of the repository — see `zyris-hello`, which does.
+# `LocalFileIo` names that crate directly out of the repository — see ridanit-ruma/zyris-hello,
+# which does.
 full = ["caps", "enroll", "p2p"]
 
 [dev-dependencies]

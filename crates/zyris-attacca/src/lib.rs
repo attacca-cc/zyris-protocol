@@ -14,7 +14,7 @@
 //! because it never asks for the new ones; a newer node against an older deployment finds the tool
 //! absent from the announcement and gets `capability_not_announced` if it calls anyway.
 //!
-//! `zyris-hello` consumes it this way, in two lines of imports. Depending on the crate is still a
+//! A node consumes it this way, in two lines of imports. Depending on the crate is still a
 //! convenience rather than a requirement: matching is by `(name, version)` and the announced tool
 //! list is never compared, so a node may instead declare just the slice it calls with its own
 //! `#[zyris::capability]` trait — which is what consuming any capability nobody has published a
