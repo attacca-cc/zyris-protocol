@@ -8,7 +8,7 @@ mod payload;
 
 pub use attach::{AttachmentTrailer, Detached};
 pub use capability::{
-    method_name, split_method, AnnounceParams, AnnounceResult, CapabilityDescriptor,
+    method_name, split_method, AnnounceParams, AnnounceResult, CallLimit, CapabilityDescriptor,
     ClosingParams, RejectedCapability, ToolDescriptor, Transfer,
 };
 pub use datum::{AttachmentRef, Blob, Chunk, Datum, INLINE_BLOB_MAX};
@@ -249,6 +249,7 @@ mod tests {
                     }),
                     response_schema: Some(serde_json::json!({"type": "object"})),
                     item_schema: None,
+                    call_limit: None,
                 }],
             }],
         };

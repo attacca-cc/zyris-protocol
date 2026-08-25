@@ -25,6 +25,7 @@ fn unary(name: &str) -> ToolDescriptor {
         request_schema: serde_json::json!({"type": "object"}),
         response_schema: None,
         item_schema: None,
+        call_limit: None,
     }
 }
 
@@ -64,6 +65,7 @@ impl ServeCapability for Blocking {
                     request_schema: serde_json::json!({"type": "object"}),
                     response_schema: None,
                     item_schema: None,
+                    call_limit: None,
                 },
             ],
         }
