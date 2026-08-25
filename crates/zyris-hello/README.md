@@ -27,7 +27,7 @@ export ZYRIS_SERVER_URL=ws://127.0.0.1:8080/zyris/v1/ws
 cargo run -p zyris-hello
 ```
 
-With no token configured, the node names itself after this machine and enrolls itself. It prints a
+With no credential saved, the node names itself after this machine and enrolls itself. It prints a
 short code and waits:
 
 ```
@@ -37,8 +37,7 @@ short code and waits:
   1. Open        http://127.0.0.1:5173/settings/zyris/device
   2. Enter code  WXQR-7KBD
 
-  Waiting for approval. This code expires in 10 minutes.
-  Press Ctrl-C to cancel.
+  Waiting for approval. Press Ctrl-C to cancel.
 --------------------------------------------------------------
 ```
 
@@ -47,18 +46,22 @@ you SSH'd from. You will see what this node says it is, where Attacca saw the re
 which scopes it asked for; you choose which to grant. Press Authorize and the node connects:
 
 ```
-Authorized as "build-box" in the account you@example.com. (scopes: agents:read)
-INFO zyris::runtime::runner: connected node_id=... conn_id=...
+INFO zyris_hello: authorized account=you@example.com
+INFO zyris_hello: registered this node node_id=... slug=build-box
+INFO zyris_hello: connected node_id=...
 INFO zyris_hello: server announced attacca_api; this node can call back into Attacca
 INFO zyris_hello: attacca_api.list_agents ok count=3 first=Researcher
 ```
 
-Credentials are written to `~/.config/zyris/` (mode `0600`) and refresh themselves, so subsequent
-runs connect without printing anything. That is `FileCredentialStore`, the default behind the
-`persistence` feature; pass your own `CredentialStore` to `Enroller::new` to keep them in a keychain
-or a Secret instead. `ATTACCA_PUBLIC_URL` must be set on the server for the verification URL to be
-printable; without it the device endpoints report themselves unavailable rather than printing an
-address that goes nowhere.
+The account credential is written to `~/.config/zyris-hello/credential.json` (mode `0600`) by
+**this crate**, in about twenty lines at the bottom of `src/main.rs`. The library never chooses a
+path: `enroll` hands the credential back as a value and `Account::restore` takes one back, so
+replacing `read_credential`/`write_credential` with a keychain, a k8s Secret or a database row is
+the whole change. Subsequent runs load it and connect without printing anything.
+
+`ATTACCA_PUBLIC_URL` must be set on the server for the verification URL to be printable; without
+it the device endpoints report themselves unavailable rather than printing an address that goes
+nowhere.
 
 The node's card in the dashboard flips to connected and lists `hello v1 > greet`. Ask an agent to
 call `zyris__{slug}__hello__greet` with `{"name": "Ada"}` — the slug is on the node card, derived
@@ -70,38 +73,44 @@ gracefully and the card flips back to offline.
 | Variable | Default | Notes |
 |---|---|---|
 | `ZYRIS_SERVER_URL` | `zyris::DEFAULT_SERVER_URL` (`wss://attacca.cc/api/zyris/v1/ws`) | Point at a local server with `ws://127.0.0.1:8080/zyris/v1/ws`. The enrollment endpoints are derived from this by truncating at `/zyris/`, so a path prefix like `/api` is carried along and a node cannot enroll against one deployment while connecting to another. |
-| `ZYRIS_NODE_TOKEN` | *unset* | A static `znt_` token. Set-but-not-`znt_`-prefixed is a hard error rather than a fall-through, so a mispasted `atk_` API key says so instead of silently enrolling past the diagnostic. |
-| `ZYRIS_NODE_TOKEN_FILE` | *unset* | Read the token from a file instead, re-read on every dial so a rotated k8s Secret or systemd `LoadCredential=` needs no restart. Lower precedence than `ZYRIS_NODE_TOKEN`; with neither set the node **enrolls**. |
-| `ZYRIS_NODE_NAME` | this machine's hostname | The name proposed at enrollment, which the approving user may change. If you already have a node by that name the server appends `-2`, so two machines called `build-box` stay individually addressable instead of one silently shadowing the other. After enrollment the name is local only: the name and slug agents see come from the dashboard, so renaming here does **not** rename an existing node. |
-| `ZYRIS_SCOPES` | what the node asks for in code (`agents:read` here) | Comma-separated scopes to *request*. The user can grant fewer, including none. Setting it wins over `Runner::request_scopes`: an operator deciding what a node may ask for outranks the node's own default. |
-| `ZYRIS_PROFILE` | `default` | Names the credential file, so one machine can hold separate identities against the same deployment. |
-| `ZYRIS_CONFIG_DIR` | XDG default | Where credentials live, for the default `FileCredentialStore`. Required under `systemd` with `ProtectHome=yes`, where there is no usable `$HOME` — the node fails loudly rather than writing a secret into its working directory. |
-| `RUST_LOG` | `zyris_hello=info,zyris=info` | Standard `tracing` filter. The authorization block is printed to stdout, not through `tracing`, so it survives `RUST_LOG=error`. |
+| `ZYRIS_NODE_NAME` | this machine's hostname | The name proposed at enrollment, and the name this node registers itself under. If an account already has a node by that name the server appends `-2`, so two machines called `build-box` stay individually addressable instead of one silently shadowing the other. Renaming does **not** rename a node that already exists — it registers another one. |
+| `ZYRIS_HELLO_CREDENTIAL` | `$XDG_CONFIG_HOME/zyris-hello/credential.json` | Where **this crate** writes the account credential. There is no library default to inherit: the path is chosen in `credential_path()` and is yours to change. Point it somewhere writable under `systemd` with `ProtectHome=yes`. |
+| `RUST_LOG` | `zyris_hello=info,zyris=info` | Standard `tracing` filter. The authorization block is printed by `authorize()` in this crate, not by the library and not through `tracing`, so it survives `RUST_LOG=error` — and a node with a screen draws it instead of printing it. |
 
 ## What to copy
 
 There are only two files, and one of them is a capability.
 
 - `src/greeter.rs` — **the part that is actually yours.** `#[zyris::capability(name = .., version =
-  ..)]` on a trait generates the descriptor, the `HelloServer<T>` you hand to the runner, and a
+  ..)]` on a trait generates the descriptor, the `HelloServer<T>` you hand to the node builder, and a
   `HelloClient` for consumers. Doc comments become the tool and field descriptions the model reads,
   so write them for the model.
-- `src/main.rs` — the wiring, and it is deliberately boring:
+- `src/main.rs` — the wiring, and every decision the library stopped making for you:
 
   ```rust
-  runner
+  let account = Account::restore(&server, credential)
+      .on_rotate(|rotated| async move { write_credential(&rotated).map_err(..) })
+      .build();
+
+  let token = account.register_node(NodeSpec { name, platform, scopes }).await?;
+
+  let link = Node::builder()
       .kind(NodeKind::Service)
-      .request_scopes(["agents:read"])
       .capability(HelloServer(greeter))
       .on_connect(|conn| async move { report_server_capabilities(&conn).await })
-      .run()
-      .await
+      .build()?
+      .connect(&server, &token)
+      .await?;
+
+  link.wait_closed().await?;
   ```
 
-  `Runner::from_env` reads the table above and picks a credential source; `run` owns the dial loop,
-  the backoff, the one forced credential rotation on a refusal, `Ctrl-C`, and the exit codes. All of
-  that lives in `zyris::runtime` (default feature `runtime`) precisely so it is not something every
-  node reimplements slightly differently.
+  Four decisions are visible there and all four are yours: where the credential is read from, what
+  the rotation callback does with a new one, what scopes the node token carries, and when the
+  process ends. `connect` owns the dial loop and the backoff and nothing else — no signal handler,
+  no exit code, no config directory. The account credential is the only thing that rotates; the
+  `znt_` a node dials with is static, which is why one credential can mint several of them and run
+  several nodes at once.
 
   `report_server_capabilities` in the same file is the **consume** half. A node is not only a tool
   provider: the server announces `attacca_api` on the same websocket, so this process can drive
@@ -116,10 +125,10 @@ There are only two files, and one of them is a capability.
   struct's four, still resolve against the real announcement. Declare the slice you call; serde
   ignores the rest.
 
-If you need something the runner does not do — your own supervision tree, a connection per tenant —
-`Node::connect` is still the primitive underneath and is not going anywhere. Swap credentials by
-implementing `zyris::runtime::Credentials` and using `Runner::new` instead of `from_env`; the three
-built-in sources (`StaticToken`, `TokenFile`, `DeviceGrant`) are ordinary impls of that same trait.
+For your own supervision tree, or a connection per tenant, keep `register_node` and dial each
+token separately: node identity comes from the token, so two tokens are two nodes and neither
+displaces the other. A node provisioned without a person skips the account layer entirely — hand
+`connect` the `znt_` string out of your secret manager, which is all it ever wanted.
 
 ## Choosing between enrollment and a static token
 
@@ -129,17 +138,42 @@ where there is a person who can approve it. It never asks you to copy a secret b
 A static `znt_` is right for anything provisioned without a human — image-baked nodes, CI, and
 **shared service accounts**. Be clear-eyed about the last one: a credential file cannot be protected
 from anyone who can `sudo -u` the account that owns it. If several people administer the account
-running this node, put a static token in your secret manager instead of enrolling. That is precisely
-why static tokens remain supported.
+running this node, put a static token in your secret manager instead of enrolling.
+
+That path is shorter than this crate's, not longer: `Node::connect` takes any bearer string, so a
+node handed a `znt_` skips `enroll`, `Account` and `register_node` altogether and never reads a
+credential file. This crate does not do it, because a reference node that never prints a code
+would not show the half that needs showing — read the last two arguments of `connect` and delete
+everything above them.
+
+## The dependencies
+
+`Cargo.toml` here names the whole protocol stack once, and the reference implementations once:
+
+```toml
+zyris = { version = "0.2", features = ["attacca", "caps", "enroll"] }
+zyris-capkit = { path = "../zyris-capkit" }
+```
+
+`zyris::caps` and `zyris::attacca` *are* the `zyris-caps` and `zyris-attacca` crates, reached
+through the face rather than named again — one version number to keep straight instead of four.
+Naming them directly is not a mistake and links nothing twice; it is just more to keep in step.
+
+The features above the runtime are `caps`, `attacca` and `p2p`, plus `enroll`, with `full` for all
+four. **`zyris-capkit` is deliberately not among them.** What a node offers is the node's decision,
+so `PtyTerminal` on the second line is an example of making that choice rather than the protocol
+making it — and the crate is unpublished, so a node that wants it names it out of this repository,
+as this one does. Copying this crate means copying that line and then replacing it. This node's
+`desktop` and `transfer` features are one line each on top of capkit's own.
 
 Two things that will bite you if you deviate:
 
 - Pin `schemars` to the same version `zyris` re-exports. The macro expands to
   `::zyris::schemars::schema_for!`, so your types must implement *that* crate's `JsonSchema`.
-- Keep `zyris`'s default features on. `Node::connect` lives behind `client`, `Runner` behind
-  `runtime`, `zyris::machine_name` behind `hostname`, and the on-disk credential store behind
-  `persistence` — all four are default. `enroll` is *not*: a node using only a static token should
-  not pay for the device grant, so `zyris-hello` opts into it explicitly.
+- Keep `zyris`'s default features on. `Node::connect` and `Link` live behind `client` and
+  `zyris::machine_name` behind `hostname`; both are default. `enroll` is *not*: a node handed a
+  static `znt_` pays for neither the device grant nor the account layer, so `zyris-hello` opts
+  into it explicitly.
 
 ## Tests
 

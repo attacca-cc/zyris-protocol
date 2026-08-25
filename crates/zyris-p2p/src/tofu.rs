@@ -20,8 +20,9 @@
 //! however it is spelled, fails it the same way. Two are worth naming anyway, since they are
 //! the ones most likely to end up
 //! here by a well-meaning mistake: attacca's own `node_id` (see `ConnectionInfo` in
-//! `zyris/src/connection.rs`), and `TokenResponse.node_name` (`zyris/src/enroll/protocol.rs`),
-//! which gets persisted as `StoredCredential.node_name` (`zyris/src/enroll/store.rs`) and looks
+//! `zyris-core/src/connection.rs`), and `TokenResponse.node_name`
+//! (`zyris-core/src/enroll/protocol.rs`), which gets persisted as `AccountCredential.node_name`
+//! (`zyris-core/src/account.rs`) and looks
 //! enough like a user-facing label to be mistaken for one. It is not: attacca supplies it,
 //! unverified, exactly like `node_id`, and reports it fresh for every node — nothing stops a
 //! fake B from arriving with a *new* `node_id` and the *same* `node_name` as the real one, or a

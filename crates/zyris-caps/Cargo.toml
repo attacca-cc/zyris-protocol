@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The standard Zyris capability declarations"
+readme = "README.md"
+keywords = ["zyris", "protocol", "capabilities", "tools", "schema"]
+categories = ["network-programming", "api-bindings"]
 
 # Declarations only: no tokio, no OS deps, nothing a client would have to pay for. `async_trait` is
 # not listed because the macro reaches it through `::zyris::`; `serde_json` is, because
@@ -13,4 +16,7 @@ description = "The standard Zyris capability declarations"
 schemars.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-zyris ={ version = "0.1.0", path = "../zyris", default-features = false }
+zyris ={ version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false }
+
+[package.metadata.docs.rs]
+all-features = true

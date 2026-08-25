@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Transport that carries Zyris over a direct node-to-node connection"
+readme = "README.md"
+keywords = ["zyris", "p2p", "quic", "iroh", "transport"]
+categories = ["network-programming", "asynchronous"]
 
 [dependencies]
 async-trait.workspace = true
@@ -16,8 +19,8 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "macros", "time", "io-util", "fs"] }
 tracing.workspace = true
-zyris = { version = "0.1.0", path = "../zyris" }
-zyris-proto = { version = "0.1.0", path = "../zyris-proto" }
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core" }
+zyris-proto = { version = "0.2.0", path = "../zyris-proto" }
 
 [dev-dependencies]
 async-trait.workspace = true
@@ -28,3 +31,6 @@ schemars.workspace = true
 serde.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["full"] }
+
+[package.metadata.docs.rs]
+all-features = true

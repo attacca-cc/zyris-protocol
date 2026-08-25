@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Wire types for the Zyris protocol"
+readme = "README.md"
+keywords = ["zyris", "protocol", "wire", "framing", "schema"]
+categories = ["network-programming", "encoding"]
 
 [dependencies]
 base64.workspace = true
@@ -16,3 +19,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2 = "0.11.0"
 thiserror.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true

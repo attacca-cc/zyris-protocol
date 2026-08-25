@@ -1,7 +1,7 @@
 //! The node's ed25519 keypair. **The private key never leaves this machine.**
 //!
-//! Same rule as a credential store — reject anything that isn't `0600`. `FileCredentialStore`
-//! checks mode for the same reason: a key someone else can read is not a key.
+//! Same rule as any file holding a secret — reject anything that isn't `0600`. A key someone
+//! else can read is not a key.
 
 use std::path::Path;
 

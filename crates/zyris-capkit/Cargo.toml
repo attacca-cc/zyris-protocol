@@ -5,6 +5,15 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Reference implementations of the standard Zyris capabilities"
+readme = "README.md"
+keywords = ["zyris", "capabilities", "terminal", "screenshot", "automation"]
+categories = ["network-programming", "os", "api-bindings"]
+# Reference implementations are the program's responsibility, not the protocol's: a library
+# consumer needs the declarations (`zyris-caps`) to speak the protocol and writes its own
+# implementations of the parts it actually offers. Keeping this crate unpublished also keeps the
+# `enigo` git fork below off crates.io, which a published crate may not depend on at all. It stays
+# a workspace member and the three consumers keep depending on it by git.
+publish = false
 
 [dependencies]
 async-trait = { workspace = true, optional = true }
@@ -36,12 +45,12 @@ tokio = { workspace = true, features = ["fs", "io-util", "process", "time", "syn
 vt100 = { version = "0.16.2", optional = true }
 tracing.workspace = true
 xcap = { version = "0.9.7", optional = true }
-zyris = { version = "0.1.0", path = "../zyris", default-features = false }
-zyris-attacca = { version = "0.1.0", path = "../zyris-attacca", optional = true }
-zyris-caps = { version = "0.1.0", path = "../zyris-caps" }
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false }
+zyris-attacca = { version = "0.2.0", path = "../zyris-attacca", optional = true }
+zyris-caps = { version = "0.2.0", path = "../zyris-caps" }
 # The sending side dials peers and pins their keys. `iroh` is never named directly — `zyris-p2p`
 # re-exports the one it resolved, so there is no way for a second copy to end up linked in.
-zyris-p2p = { version = "0.1.0", path = "../zyris-p2p", optional = true }
+zyris-p2p = { version = "0.2.0", path = "../zyris-p2p", optional = true }
 
 # `xcap` enumerates monitors over XRandR even in a Wayland session, then captures in Wayland's
 # coordinate space; the two disagree whenever Xwayland cannot express the compositor's layout. The
@@ -94,7 +103,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 # `zyris::testing::duplex` — two real Connections over a channel. Every transfer test drives the
 # whole exchange through it, so none of them needs a socket. It is a non-default feature, and
 # without this line the transfer tests do not compile at all.
-zyris = { version = "0.1.0", path = "../zyris", default-features = false, features = ["testing"] }
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false, features = ["testing"] }
 # The transfer tests have to produce the same digest the receiving side will check, so they need
 # the same two crates the implementation uses. Already in the tree as optional deps of `transfer`;
 # a dependency of the crate is not visible to its integration tests, hence the repeat.
@@ -105,3 +114,8 @@ hex = "0.4"
 # `zyris_p2p::iroh` because `test-utils` is a feature of iroh itself, and a re-export cannot turn
 # on a feature of the crate it re-exports.
 iroh = { version = "1", features = ["test-utils"] }
+
+[package.metadata.docs.rs]
+# `screen` and `input` link the display stack; docs.rs has no session to capture and no X11 or
+# Wayland development packages. Everything else is documented.
+features = ["file-io", "terminal", "transfer", "transfer-send", "transfer-listen"]

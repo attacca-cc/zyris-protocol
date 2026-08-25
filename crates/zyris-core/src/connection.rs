@@ -685,10 +685,16 @@ pub(crate) async fn establish(
                 }
             };
             if ack.protocol.major != PROTOCOL_MAJOR {
+                // The number goes in `data` as well as the message: `ConnectError::VersionMismatch`
+                // reports it as a field, and reading it back out of prose would tie a typed error
+                // to the wording of a sentence.
                 return Err(WireError::new(
                     ErrorCode::UnsupportedVersion,
                     format!("server speaks v{}", ack.protocol.major),
-                ));
+                )
+                .with_data(Payload::from_json(
+                    serde_json::json!({ "peer_major": ack.protocol.major }),
+                )));
             }
             let info = ConnectionInfo {
                 conn_id: ack.conn_id.clone(),

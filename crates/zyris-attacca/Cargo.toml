@@ -5,14 +5,20 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The attacca_api capability: the surface the Attacca deployment announces to its nodes"
+readme = "README.md"
+keywords = ["zyris", "attacca", "agent", "protocol", "api"]
+categories = ["network-programming", "api-bindings"]
 
 [dependencies]
 schemars.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-zyris = { version = "0.1.0", path = "../zyris", default-features = false }
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false }
 
 [dev-dependencies]
 futures-util.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-zyris = { path = "../zyris", default-features = false, features = ["testing"] }
+zyris = { package = "zyris-core", path = "../zyris-core", default-features = false, features = ["testing"] }
+
+[package.metadata.docs.rs]
+all-features = true

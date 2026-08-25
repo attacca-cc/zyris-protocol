@@ -255,7 +255,7 @@ impl Default for FileTransferConfig {
 /// It used to be a `OnceLock`, on the reasoning that a connection has one client and a slot that
 /// can be overwritten is a slot that can be swapped. The first half is true and the second is the
 /// wrong conclusion: a node's websocket drops and comes back — a laptop sleeps, a server rolls, a
-/// network blips — and `Runner` reconnects and calls `set_api` again with a client for the new
+/// network blips — and the `Link` reconnects and calls `set_api` again with a client for the new
 /// connection. A write-once slot ignores that call and keeps the client bound to the dead one, so
 /// every lookup after the first disconnect fails with `connection lost`, for good, on a node that
 /// otherwise looks perfectly healthy. Observed live: a send worked, the socket reset once, and
@@ -295,7 +295,7 @@ impl Rendezvous {
 pub struct LocalFileTransfer {
     config: FileTransferConfig,
     /// The rendezvous client, which does not exist yet when a node builds its capabilities: it
-    /// arrives on the connection to Attacca, after `Runner::run` has been handed everything this
+    /// arrives on the connection to Attacca, after `Node::connect` has been handed everything this
     /// node announces. See [`Rendezvous`] for why it is replaceable rather than write-once.
     api: Rendezvous,
     tofu: TofuStore,
