@@ -3,9 +3,10 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
+use syn::punctuated::Punctuated;
 use syn::{
-    Error, FnArg, Ident, ItemTrait, LitInt, LitStr, Pat, PathArguments, ReturnType, Token,
-    TraitItem, TraitItemFn, Type,
+    Error, Expr, FnArg, Ident, ItemTrait, Lit, LitInt, LitStr, Meta, Pat, PathArguments, Result,
+    ReturnType, Token, TraitItem, TraitItemFn, Type,
 };
 
 struct CapabilityArgs {
@@ -48,10 +49,19 @@ enum Transfer {
     UniStream,
 }
 
+/// What `#[zyris(limit = ...)]` said, if anything. `None` is silence, which the descriptor
+/// carries as an absent field and every caller reads as its own default.
+#[derive(Clone, Copy, PartialEq)]
+enum CallLimit {
+    Secs(u32),
+    Unlimited,
+}
+
 struct ToolMethod {
     ident: Ident,
     description: String,
     transfer: Transfer,
+    call_limit: Option<CallLimit>,
     args: Vec<(Ident, Type)>,
     response: Type,
     stream_item: Option<Type>,
@@ -136,21 +146,47 @@ fn parse_method(trait_ident: &Ident, method: &mut TraitItemFn) -> syn::Result<To
             true
         }
     });
+    let mut call_limit = None;
     for attr in zyris_attrs {
-        let mode: Ident = attr.parse_args()?;
-        match mode.to_string().as_str() {
-            "uni_stream" => transfer = Transfer::UniStream,
-            "bi_stream" => {
-                return Err(Error::new(mode.span(), "bi_stream is reserved in Zyris protocol v1"))
-            }
-            "video_stream" => {
-                return Err(Error::new(mode.span(), "video_stream tools are not supported yet"))
-            }
-            other => {
-                return Err(Error::new(
-                    mode.span(),
-                    format!("unknown transfer mechanism `{other}`"),
-                ))
+        // Two shapes now: a bare word for the transfer mode, and `name = value` for anything that
+        // carries a value. Parsed as `Meta` so both land in one match rather than one of them
+        // failing to parse before the other is ever considered.
+        for meta in attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)? {
+            match meta {
+                Meta::Path(path) => {
+                    let mode = path.require_ident()?;
+                    match mode.to_string().as_str() {
+                        "uni_stream" => transfer = Transfer::UniStream,
+                        "bi_stream" => {
+                            return Err(Error::new(
+                                mode.span(),
+                                "bi_stream is reserved in Zyris protocol v1",
+                            ))
+                        }
+                        "video_stream" => {
+                            return Err(Error::new(
+                                mode.span(),
+                                "video_stream tools are not supported yet",
+                            ))
+                        }
+                        other => {
+                            return Err(Error::new(
+                                mode.span(),
+                                format!("unknown transfer mechanism `{other}`"),
+                            ))
+                        }
+                    }
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("limit") => {
+                    call_limit = Some(parse_call_limit(&nv.value)?);
+                }
+                other => {
+                    return Err(Error::new(
+                        other.span(),
+                        "unknown zyris attribute; expected `uni_stream` or `limit = <seconds>` \
+                         / `limit = false`",
+                    ))
+                }
             }
         }
     }
@@ -196,6 +232,7 @@ fn parse_method(trait_ident: &Ident, method: &mut TraitItemFn) -> syn::Result<To
         ident: method.sig.ident.clone(),
         description,
         transfer,
+        call_limit,
         args,
         response,
         stream_item,
@@ -262,6 +299,37 @@ fn streaming_types(ty: &Type) -> syn::Result<(Type, Type)> {
     let head = types.next().ok_or_else(err)?;
     let item = types.next().ok_or_else(err)?;
     Ok((head, item))
+}
+
+/// `limit = 600` is six hundred seconds; `limit = false` is no limit at all.
+///
+/// `false` rather than a magic number because a number cannot say this: `0` reads as "no time"
+/// as easily as "no limit", and whichever one a reader picks the other is a bug. There is
+/// deliberately no `limit = true` — "yes, limited" without saying to what is the default, and the
+/// way to ask for the default is to say nothing.
+fn parse_call_limit(value: &Expr) -> Result<CallLimit> {
+    let Expr::Lit(lit) = value else {
+        return Err(Error::new(value.span(), "limit must be a number of seconds or `false`"));
+    };
+    match &lit.lit {
+        Lit::Int(int) => {
+            let secs: u32 = int.base10_parse()?;
+            if secs == 0 {
+                return Err(Error::new(
+                    int.span(),
+                    "a limit of 0 would refuse every call; use `limit = false` for no limit",
+                ));
+            }
+            Ok(CallLimit::Secs(secs))
+        }
+        Lit::Bool(b) if !b.value => Ok(CallLimit::Unlimited),
+        Lit::Bool(b) => Err(Error::new(
+            b.span(),
+            "`limit = true` says nothing a caller can act on; give seconds, or omit the attribute \
+             to take the caller's default",
+        )),
+        other => Err(Error::new(other.span(), "limit must be a number of seconds or `false`")),
+    }
 }
 
 fn doc_string(attrs: &[syn::Attribute]) -> String {
@@ -332,6 +400,13 @@ fn descriptor_fn(
             },
             None => quote!(None),
         };
+        let call_limit = match method.call_limit {
+            Some(CallLimit::Secs(secs)) => {
+                quote!(Some(::zyris::CallLimit::Secs(#secs)))
+            }
+            Some(CallLimit::Unlimited) => quote!(Some(::zyris::CallLimit::Unlimited)),
+            None => quote!(None),
+        };
         quote! {
             ::zyris::ToolDescriptor {
                 name: #tool_name.to_string(),
@@ -344,6 +419,7 @@ fn descriptor_fn(
                     ::zyris::schemars::schema_for!(#response)
                 ).expect("response schema")),
                 item_schema: #item_schema,
+                call_limit: #call_limit,
             }
         }
     });

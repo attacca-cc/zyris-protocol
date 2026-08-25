@@ -35,7 +35,7 @@ pub use serve::{
 
 pub use zyris_proto as proto;
 pub use zyris_proto::{
-    AttachmentRef, AttachmentTrailer, Blob, CapabilityDescriptor, Chunk, Datum, Payload,
+    AttachmentRef, AttachmentTrailer, Blob, CallLimit, CapabilityDescriptor, Chunk, Datum, Payload,
     Serialization, ToolDescriptor, Transfer, WireError, INLINE_BLOB_MAX,
 };
 
@@ -105,6 +105,7 @@ mod tests {
                     request_schema: serde_json::json!({"type": "object"}),
                     response_schema: None,
                     item_schema: None,
+                    call_limit: None,
                 },
                 ToolDescriptor {
                     name: "caller".into(),
@@ -113,6 +114,7 @@ mod tests {
                     request_schema: serde_json::json!({"type": "object"}),
                     response_schema: None,
                     item_schema: None,
+                    call_limit: None,
                 },
                 ToolDescriptor {
                     name: "count".into(),
@@ -121,6 +123,7 @@ mod tests {
                     request_schema: serde_json::json!({"type": "object"}),
                     response_schema: None,
                     item_schema: None,
+                    call_limit: None,
                 },
             ],
         }
@@ -352,6 +355,7 @@ mod tests {
                         request_schema: serde_json::json!({"type": "object"}),
                         response_schema: None,
                         item_schema: None,
+                        call_limit: None,
                     }],
                 }
             }
