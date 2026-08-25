@@ -6,7 +6,7 @@ RFC 8628 device-grant enrollment.
 
 **Most nodes should depend on [`zyris`](https://crates.io/crates/zyris) instead.** That crate
 re-exports everything here at its root and adds the layers above it — `zyris::caps`,
-`zyris::attacca`, `zyris::p2p` — behind features. `zyris::Node` and
+`zyris::p2p` — behind features. `zyris::Node` and
 `zyris_core::Node` are one type, so nothing is lost either way.
 
 This crate exists under its own name because every layer above the runtime depends on the runtime,

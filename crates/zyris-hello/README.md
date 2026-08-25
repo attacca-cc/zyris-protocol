@@ -151,15 +151,17 @@ everything above them.
 `Cargo.toml` here names the whole protocol stack once, and the reference implementations once:
 
 ```toml
-zyris = { version = "0.2", features = ["attacca", "caps", "enroll"] }
+zyris = { version = "0.2", features = ["caps", "enroll"] }
+zyris-attacca = { version = "0.2" }
 zyris-capkit = { path = "../zyris-capkit" }
 ```
 
-`zyris::caps` and `zyris::attacca` *are* the `zyris-caps` and `zyris-attacca` crates, reached
-through the face rather than named again — one version number to keep straight instead of four.
-Naming them directly is not a mistake and links nothing twice; it is just more to keep in step.
+`zyris::caps` *is* the `zyris-caps` crate, reached through the face rather than named again — one
+version number to keep straight instead of two. Naming it directly is not a mistake and links
+nothing twice; it is just more to keep in step. `zyris-attacca` is the exception, named on its own
+line above: Attacca is one deployment rather than the protocol, so the face does not carry it.
 
-The features above the runtime are `caps`, `attacca` and `p2p`, plus `enroll`, with `full` for all
+The features above the runtime are `caps` and `p2p`, plus `enroll`, with `full` for all
 four. **`zyris-capkit` is deliberately not among them.** What a node offers is the node's decision,
 so `PtyTerminal` on the second line is an example of making that choice rather than the protocol
 making it — and the crate is unpublished, so a node that wants it names it out of this repository,
