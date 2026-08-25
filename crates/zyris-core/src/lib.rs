@@ -116,6 +116,7 @@ mod tests {
                     request_schema: serde_json::json!({"type": "object"}),
                     response_schema: None,
                     item_schema: None,
+                    call_limit: None,
                 },
                 ToolDescriptor {
                     name: "caller".into(),
@@ -124,6 +125,7 @@ mod tests {
                     request_schema: serde_json::json!({"type": "object"}),
                     response_schema: None,
                     item_schema: None,
+                    call_limit: None,
                 },
                 ToolDescriptor {
                     name: "count".into(),
@@ -132,6 +134,7 @@ mod tests {
                     request_schema: serde_json::json!({"type": "object"}),
                     response_schema: None,
                     item_schema: None,
+                    call_limit: None,
                 },
             ],
         }
@@ -363,6 +366,7 @@ mod tests {
                         request_schema: serde_json::json!({"type": "object"}),
                         response_schema: None,
                         item_schema: None,
+                        call_limit: None,
                     }],
                 }
             }
