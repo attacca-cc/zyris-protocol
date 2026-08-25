@@ -6469,43 +6469,30 @@ dependencies = [
 
 [[package]]
 name = "zyris"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
- "async-trait",
- "axum",
- "bytes",
- "cargo-husky",
- "futures-util",
- "gethostname",
- "reqwest",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
  "tokio",
- "tokio-tungstenite",
- "tracing",
- "uuid",
- "zyris-macros",
- "zyris-proto",
+ "zyris-attacca",
+ "zyris-caps",
+ "zyris-core",
+ "zyris-p2p",
 ]
 
 [[package]]
 name = "zyris-attacca"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "schemars",
  "serde",
  "serde_json",
  "tokio",
- "zyris",
+ "zyris-core",
 ]
 
 [[package]]
 name = "zyris-capkit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6525,44 +6512,66 @@ dependencies = [
  "tracing",
  "vt100",
  "xcap",
- "zyris",
  "zyris-attacca",
  "zyris-caps",
+ "zyris-core",
  "zyris-p2p",
 ]
 
 [[package]]
 name = "zyris-caps"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "zyris-core",
+]
+
+[[package]]
+name = "zyris-core"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bytes",
+ "cargo-husky",
+ "futures-util",
+ "gethostname",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
  "zyris",
+ "zyris-macros",
+ "zyris-proto",
 ]
 
 [[package]]
 name = "zyris-hello"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "rand 0.9.5",
  "schemars",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "zyris",
- "zyris-attacca",
  "zyris-capkit",
- "zyris-caps",
- "zyris-p2p",
 ]
 
 [[package]]
 name = "zyris-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6570,12 +6579,12 @@ dependencies = [
  "serde",
  "syn 3.0.3",
  "trybuild",
- "zyris",
+ "zyris-core",
 ]
 
 [[package]]
 name = "zyris-p2p"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6589,13 +6598,13 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tracing",
- "zyris",
+ "zyris-core",
  "zyris-proto",
 ]
 
 [[package]]
 name = "zyris-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.23.0",
  "bytes",

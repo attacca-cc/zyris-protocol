@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Proc-macros for the Zyris protocol"
+readme = "README.md"
+keywords = ["zyris", "protocol", "macro", "capability", "codegen"]
+categories = ["development-tools::procedural-macro-helpers", "network-programming"]
 
 [lib]
 proc-macro = true
@@ -18,4 +21,7 @@ syn = { version = "3.0.3", features = ["full"] }
 schemars.workspace = true
 serde = { workspace = true, features = ["derive"] }
 trybuild = "1.0.118"
-zyris = { path = "../zyris", default-features = false }
+zyris = { package = "zyris-core", path = "../zyris-core", default-features = false }
+
+[package.metadata.docs.rs]
+all-features = true

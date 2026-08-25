@@ -17,15 +17,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use zyris::Connection;
-use zyris_attacca::{AttaccaApi, AttaccaApiClient};
-use zyris_caps::FileTransferServer;
+use zyris::attacca::{AttaccaApi, AttaccaApiClient};
+use zyris::caps::FileTransferServer;
 use zyris_capkit::transfer::listen::serve_peers;
 use zyris_capkit::transfer::{
     FileTransferConfig, IrohPeerLink, LocalFileTransfer, TransferConfig,
 };
-use zyris_p2p::fingerprint::{fingerprint, PeerConfirmer};
-use zyris_p2p::iroh;
-use zyris_p2p::tofu::TofuStore;
+use zyris::p2p::fingerprint::{fingerprint, PeerConfirmer};
+use zyris::p2p::iroh;
+use zyris::p2p::tofu::TofuStore;
 
 /// Everything the transfer half of this node holds on to between connections.
 pub struct Transfer {
@@ -57,17 +57,17 @@ impl Transfer {
         // QUIC session is end to end), yet they still see who talks to whom and when. A deployment
         // running its own relay says so with `ZYRIS_RELAY_URL`, and this logs which it ended up on
         // rather than leaving that to be discovered from a packet capture.
-        // **Handed a key, not left to generate one.** `zyris_p2p::key` writes it `0600` and reads
+        // **Handed a key, not left to generate one.** `zyris::p2p::key` writes it `0600` and reads
         // the same one back next time, which is what makes this node the same node run to run.
         // Without it iroh mints a fresh identity at every start, and a peer that pinned this one
         // after comparing fingerprints would meet a stranger the next time it came up — the pin
         // would expire with the process, which is not a pin. It hides well, too: the accept loop
         // never consults a pin, so receiving keeps working and only sending breaks.
-        let secret = zyris_p2p::key::load_or_create(&key_path).await?;
+        let secret = zyris::p2p::key::load_or_create(&key_path).await?;
 
         let builder = iroh::Endpoint::builder(iroh::endpoint::presets::N0)
             .secret_key(secret)
-            .alpns(vec![zyris_p2p::transport::ALPN.to_vec()]);
+            .alpns(vec![zyris::p2p::transport::ALPN.to_vec()]);
         let builder = match std::env::var("ZYRIS_RELAY_URL").ok().filter(|u| !u.trim().is_empty()) {
             Some(url) => {
                 let parsed: iroh::RelayUrl = url.parse()?;

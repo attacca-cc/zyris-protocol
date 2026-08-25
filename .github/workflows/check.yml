@@ -39,7 +39,10 @@ jobs:
       # 6 tests need `xcap`/`libwayshot` and a session to capture — so they are not silently
       # missing, they are deliberately not run here.
       - name: cargo test
-        run: cargo test --workspace --features zyris-capkit/transfer-send,zyris-capkit/transfer-listen
+        # `zyris/enroll` is here so the `facade_probe` example is compiled: it declares
+        # `required-features = ["enroll"]`, and a target whose features are not enabled is
+        # skipped silently rather than failing — which would make it a guard that guards nothing.
+        run: cargo test --workspace --features zyris-capkit/transfer-send,zyris-capkit/transfer-listen,zyris/enroll
 
   # Windows is a platform this repo makes claims about and has never run. `Terminal::exec`'s doc
   # tells an agent how to run a PowerShell script without fighting quoting — that sentence *is* the

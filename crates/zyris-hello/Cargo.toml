@@ -15,16 +15,20 @@ path = "src/main.rs"
 rand = "0.9"
 schemars.workspace = true
 serde = { workspace = true, features = ["derive"] }
-# No `signal` or `time`: the reconnect loop and the Ctrl-C handling live in `zyris::runtime`, which
-# brings its own. A node only needs enough tokio to have a runtime to run on.
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+# This node stores its own account credential, because the library does not: it hands one back
+# as a value and takes one back as one.
+serde_json.workspace = true
+# `signal` is this program's, not the library's: when a node stops is a decision nothing under
+# `zyris::` makes any more.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-zyris = { version = "0.1.0", path = "../zyris", features = ["enroll"] }
-zyris-attacca = { version = "0.1.0", path = "../zyris-attacca" }
-zyris-caps = { version = "0.1.0", path = "../zyris-caps" }
-zyris-capkit = { version = "0.1.0", path = "../zyris-capkit" }
-zyris-p2p = { version = "0.1.0", path = "../zyris-p2p", optional = true }
+# The protocol, the declarations and the `attacca_api` client, all through the face.
+zyris = { version = "0.2.0", path = "../zyris", features = ["attacca", "caps", "enroll"] }
+# The reference implementations, named directly. They are not part of the published face: what a
+# node offers is the node's decision, so `PtyTerminal` here is an example of the choice, not the
+# protocol making it. Copying this crate means copying this line and then replacing it.
+zyris-capkit = { version = "0.2.0", path = "../zyris-capkit" }
 anyhow = { version = "1", optional = true }
 # For the `PeerConfirmer` impl below — the trait is `#[async_trait]`, so an implementor needs it too.
 async-trait = { workspace = true, optional = true }
@@ -42,7 +46,11 @@ desktop = ["zyris-capkit/desktop", "zyris-capkit/input-wayland"]
 transfer = [
     "zyris-capkit/transfer-send",
     "zyris-capkit/transfer-listen",
-    "dep:zyris-p2p",
+    # The rendezvous is how a peer learns whose node it is talking to, and this crate names both
+    # of those modules itself, so it asks the face for them rather than relying on capkit's
+    # private copies.
+    "zyris/attacca",
+    "zyris/p2p",
     "dep:anyhow",
     "dep:async-trait",
 ]

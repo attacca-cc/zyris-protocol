@@ -94,7 +94,7 @@ impl CapabilitySet {
 /// `capability_unavailable` rather than landing after the peer was told they could not happen.
 ///
 /// The set outlives any one connection, so a change made while connected also survives the
-/// reconnect loop in [`Runner`](crate::runtime::Runner).
+/// reconnect that [`Node::connect`](crate::Node::connect) performs behind a [`Link`](crate::Link).
 #[derive(Clone)]
 pub struct Capabilities(Arc<CapabilitySet>);
 

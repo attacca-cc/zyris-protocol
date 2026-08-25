@@ -213,48 +213,6 @@ fn clamp_interval(interval: Duration) -> Duration {
     interval.clamp(MIN_POLL_INTERVAL, MAX_POLL_INTERVAL)
 }
 
-/// Render the block a node prints while waiting.
-///
-/// Pure ASCII, no box drawing: this has to survive an SSH session into a machine with an unhelpful
-/// locale. The code is printed with its hyphen but no internal spaces, so a double-click selects
-/// the whole thing.
-///
-/// Two steps, not three: the server's `verification_uri` points at the code-entry screen itself, so
-/// there is no button to hunt for in between. It still carries no code — a prefilled link is the one
-/// thing RFC 8628 §5.4 names and offers no mitigation for.
-pub fn authorization_notice(response: &AuthorizeResponse) -> String {
-    let minutes = (response.expires_in + 59) / 60;
-    format!(
-        "\n\
-         --------------------------------------------------------------\n  \
-         Authorize this node\n\n  \
-         1. Open        {uri}\n  \
-         2. Enter code  {code}\n\n  \
-         Waiting for approval. This code expires in {minutes} minutes.\n  \
-         Press Ctrl-C to cancel.\n\
-         --------------------------------------------------------------\n",
-        uri = response.verification_uri,
-        code = response.user_code,
-        minutes = minutes,
-    )
-}
-
-/// The line printed once a node is live. Names the account, because enrolling into the wrong
-/// deployment is otherwise silent and indistinguishable from success.
-pub fn authorized_notice(response: &TokenResponse) -> String {
-    let scopes = if response.scope.trim().is_empty() {
-        "no access to your Attacca account".to_string()
-    } else {
-        format!("scopes: {}", response.scope)
-    };
-    format!(
-        "Authorized as \"{name}\" in the account {email}. ({scopes})",
-        name = response.node_name,
-        email = response.owner_email,
-        scopes = scopes,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,45 +397,5 @@ mod tests {
             panic!("a body we could not read tells us nothing about the grant")
         };
         assert_eq!(reason, "http_503", "with no description the code stands alone");
-    }
-
-    /// The notice is the primary UX of this feature and has to survive SSH: ASCII only, and no
-    /// internal spaces in the code so a double-click selects it whole.
-    #[test]
-    fn the_notice_is_plain_ascii_and_selectable() {
-        let notice = authorization_notice(&AuthorizeResponse {
-            device_code: "zdc_secret".into(),
-            user_code: "WXQR-7KBD".into(),
-            verification_uri: "https://attacca.example/settings/zyris/device".into(),
-            expires_in: 600,
-            interval: 5,
-        });
-        assert!(notice.is_ascii());
-        assert!(notice.contains("WXQR-7KBD"));
-        assert!(notice.contains("expires in 10 minutes"));
-        assert!(!notice.contains("zdc_secret"), "the device code is never displayed");
-    }
-
-    #[test]
-    fn the_success_line_names_the_account_and_the_grant() {
-        let response = TokenResponse {
-            access_token: "zna_x".into(),
-            refresh_token: "znr_x".into(),
-            expires_in: 3600,
-            scope: "sessions:read".into(),
-            node_id: "n".into(),
-            node_name: "hello node".into(),
-            owner_email: "allen@example.com".into(),
-        };
-        let line = authorized_notice(&response);
-        assert!(line.contains("hello node"));
-        assert!(line.contains("allen@example.com"));
-        assert!(line.contains("sessions:read"));
-        assert!(!line.contains("zna_x"), "credentials are never printed");
-
-        // The zero-scope case is the common one for a tool-only node and gets plain words rather
-        // than an empty list.
-        let bare = authorized_notice(&TokenResponse { scope: String::new(), ..response });
-        assert!(bare.contains("no access to your Attacca account"));
     }
 }

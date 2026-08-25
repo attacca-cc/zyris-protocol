@@ -1,0 +1,62 @@
+[package]
+name = "zyris-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Zyris node runtime and client"
+readme = "README.md"
+keywords = ["zyris", "protocol", "node", "websocket", "runtime"]
+categories = ["network-programming", "asynchronous", "web-programming::websocket"]
+
+[dependencies]
+async-trait.workspace = true
+axum = { workspace = true, features = ["ws"], optional = true }
+bytes.workspace = true
+futures-util.workspace = true
+gethostname = { version = "1.1.0", optional = true }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "http2", "charset"], optional = true }
+schemars.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "macros", "time", "io-util"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"], optional = true }
+tracing.workspace = true
+uuid.workspace = true
+zyris-macros = { version = "0.2.0", path = "../zyris-macros" }
+zyris-proto = { version = "0.2.0", path = "../zyris-proto" }
+
+[features]
+default = ["client", "hostname"]
+# The websocket dialer, and with it `Node::connect` and the reconnect loop behind `Link`. No
+# `tokio/signal`: when a node stops is the program's decision, not this crate's.
+client = ["dep:tokio-tungstenite"]
+axum = ["dep:axum"]
+testing = []
+# Self-registration over the RFC 8628 device grant, and the `Account` layer that mints node tokens
+# from what it issues. Off by default so a node using a static `znt_` pays nothing for them. The
+# marginal cost when it is on is smaller than it looks: `client` already pulls rustls and the
+# native root store through `tokio-tungstenite`, so `reqwest` reuses that TLS stack and only adds
+# the hyper/tower layer.
+enroll = ["dep:reqwest"]
+# Name the node after the machine it runs on. On by default because a node that names itself is the
+# difference between zero configuration and one more variable to get wrong; `gethostname` is a thin
+# wrapper over `gethostname(2)`/`GetComputerNameExW` and adds nothing transitive.
+hostname = ["dep:gethostname"]
+
+[dev-dependencies]
+# The face, so the tests and doctests here are written the way a node author writes them —
+# `use zyris::…` — and the paths `#[zyris::capability]` generates resolve. A dev-dependency may
+# point back at a crate that depends on this one: Cargo forbids cycles only among normal
+# dependencies, and a path-only dev-dependency is stripped from the published manifest.
+# `zyris-macros` has depended back on this crate the same way since before the split.
+zyris = { path = "../zyris" }
+# Installs the commit hook into `.git/hooks` the first time `cargo test` runs
+# (Rust counterpart of simple-git-hooks). Hook scripts live in `.cargo-husky/hooks/`;
+# the `commit-msg` one enforces Conventional Commits. Set
+# CARGO_HUSKY_DONT_INSTALL_HOOKS=true to skip installation.
+cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }
+
+[package.metadata.docs.rs]
+all-features = true
