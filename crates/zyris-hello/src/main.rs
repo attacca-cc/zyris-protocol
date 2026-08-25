@@ -18,7 +18,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use greeter::{HelloServer, RandomGreeter};
-use zyris::attacca::{AttaccaApi, AttaccaApiClient};
+use zyris_attacca::{AttaccaApi, AttaccaApiClient};
 use zyris::caps::TerminalServer;
 use zyris::enroll::{EnrollRequest, Progress};
 use zyris::{

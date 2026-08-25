@@ -132,6 +132,36 @@ fn depending_on_the_face_never_pulls_in_the_reference_implementations() {
     );
 }
 
+/// Attacca is one deployment, not the protocol. This crate is what someone reaching for "the Zyris
+/// protocol" gets, and a particular hub's capability declaration does not belong in that: a node
+/// that talks to Attacca names `zyris-attacca` directly, which is what every consumer already does
+/// — zyris-code, zyris-daemon and Attacca's own server all list it as a dependency of their own,
+/// and none of them has ever asked the face for it.
+///
+/// `--all-features` is the whole point. An optional dependency nobody has enabled yet is still one
+/// `--features` flag away from being linked, so the promise has to be about every way this crate
+/// can be built rather than the default one.
+#[test]
+fn the_face_does_not_name_one_deployments_hub() {
+    let linked = crates_a_consumer_of_this_one_links();
+
+    // Same guard as above: if the walk never left the root, the assertion below proves nothing.
+    assert!(
+        linked.contains("zyris-proto"),
+        "the walk reached {} crate(s) and none of them was the wire format, so it never left the \
+         root and proves nothing",
+        linked.len()
+    );
+
+    assert!(
+        !linked.contains("zyris-attacca"),
+        "depending on {} now links zyris-attacca, so the protocol's face carries one deployment's \
+         hub. `cargo tree -p {} --all-features -i zyris-attacca` names the path.",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_NAME")
+    );
+}
+
 #[test]
 fn the_face_does_not_advertise_a_crates_io_page_that_will_never_exist() {
     let readme = file("zyris/README.md");

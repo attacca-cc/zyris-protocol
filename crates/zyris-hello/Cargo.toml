@@ -24,7 +24,10 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 # The protocol, the declarations and the `attacca_api` client, all through the face.
-zyris = { version = "0.2.0", path = "../zyris", features = ["attacca", "caps", "enroll"] }
+zyris = { version = "0.2.0", path = "../zyris", features = ["caps", "enroll"] }
+# Named directly rather than reached through the face. `attacca_api` is one deployment's hub, so
+# the protocol's face does not carry it — every consumer that talks to Attacca lists it here.
+zyris-attacca = { version = "0.2.0", path = "../zyris-attacca" }
 # The reference implementations, named directly. They are not part of the published face: what a
 # node offers is the node's decision, so `PtyTerminal` here is an example of the choice, not the
 # protocol making it. Copying this crate means copying this line and then replacing it.
@@ -49,7 +52,6 @@ transfer = [
     # The rendezvous is how a peer learns whose node it is talking to, and this crate names both
     # of those modules itself, so it asks the face for them rather than relying on capkit's
     # private copies.
-    "zyris/attacca",
     "zyris/p2p",
     "dep:anyhow",
     "dep:async-trait",

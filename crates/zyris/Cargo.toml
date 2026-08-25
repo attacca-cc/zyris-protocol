@@ -15,7 +15,6 @@ readme = "README.md"
 # `zyris-core` directly — the layers below this one do the latter, because a crate cannot depend on
 # something that depends on it.
 zyris-core = { version = "0.2.0", path = "../zyris-core", default-features = false }
-zyris-attacca = { version = "0.2.0", path = "../zyris-attacca", optional = true }
 zyris-caps = { version = "0.2.0", path = "../zyris-caps", optional = true }
 zyris-p2p = { version = "0.2.0", path = "../zyris-p2p", optional = true }
 
@@ -34,20 +33,25 @@ testing = ["zyris-core/testing"]
 # --- The stack. Each one adds a module at the root of this crate. ---
 # Declarations only — no tokio, no OS libraries.
 caps = ["dep:zyris-caps"]
-# The one capability that runs the other way: announced by the server, called by the node.
-attacca = ["dep:zyris-attacca"]
 # Node-to-node QUIC transport.
 p2p = ["dep:zyris-p2p"]
 
 # Every layer this crate has a module for, plus enrollment. **The reference implementations are not
 # one of them**: they are unpublished on purpose, so a node that wants `PtyTerminal` or
 # `LocalFileIo` names that crate directly out of the repository — see `zyris-hello`, which does.
-full = ["attacca", "caps", "enroll", "p2p"]
+full = ["caps", "enroll", "p2p"]
 
 [dev-dependencies]
 # For the example below. A crate cannot hand out an async runtime, so the one place this repo
 # names tokio in the face is a target that is not part of the published library.
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+
+[[example]]
+# The whole of Zyris in one file: declare a capability, take a node, serve it. An example rather
+# than a test so that a person can run it against a deployment, and `cargo test` compiles it
+# either way, which is what makes it a regression guard as well as the documentation.
+name = "hello"
+required-features = ["enroll"]
 
 [[example]]
 # Proof that the whole flow — enrol, register a node, connect — is reachable through this crate

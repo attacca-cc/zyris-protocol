@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use zyris::Connection;
-use zyris::attacca::{AttaccaApi, AttaccaApiClient};
+use zyris_attacca::{AttaccaApi, AttaccaApiClient};
 use zyris::caps::FileTransferServer;
 use zyris_capkit::transfer::listen::serve_peers;
 use zyris_capkit::transfer::{

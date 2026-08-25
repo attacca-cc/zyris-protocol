@@ -42,7 +42,6 @@
 //! | Module | Feature | What it is |
 //! |---|---|---|
 //! | `caps` | `caps` | The standard capability catalogue. Declarations only. |
-//! | `attacca` | `attacca` | The `attacca_api` capability — the one that runs the other way. |
 //! | `p2p` | `p2p` | Transport that carries Zyris directly between two nodes. |
 //!
 //! Each is also a crate of its own (`zyris-caps`, `zyris-attacca`, …). Depending on one directly
@@ -71,12 +70,6 @@ pub use zyris_core;
 #[cfg(feature = "caps")]
 #[cfg_attr(docsrs, doc(cfg(feature = "caps")))]
 pub use zyris_caps as caps;
-
-/// The `attacca_api` capability: the surface an Attacca deployment announces to its nodes, rather
-/// than the other way round. Depend on it to call Attacca back.
-#[cfg(feature = "attacca")]
-#[cfg_attr(docsrs, doc(cfg(feature = "attacca")))]
-pub use zyris_attacca as attacca;
 
 /// Transport that carries Zyris over a direct node-to-node connection.
 #[cfg(feature = "p2p")]

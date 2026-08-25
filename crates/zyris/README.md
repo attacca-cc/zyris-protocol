@@ -45,7 +45,6 @@ is a module behind a feature:
 | `zyris::*` | — | [`zyris-core`](https://crates.io/crates/zyris-core) | The runtime: connection state machine, transports, announce/accept, the dial-and-reconnect loop, device-grant enrollment. |
 | `zyris::proto` | — | [`zyris-proto`](https://crates.io/crates/zyris-proto) | Wire types only. No I/O, no async. |
 | `zyris::caps` | `caps` | [`zyris-caps`](https://crates.io/crates/zyris-caps) | The standard capability catalogue. Declarations only. |
-| `zyris::attacca` | `attacca` | [`zyris-attacca`](https://crates.io/crates/zyris-attacca) | The `attacca_api` capability — the one announced by the server. |
 | `zyris::p2p` | `p2p` | [`zyris-p2p`](https://crates.io/crates/zyris-p2p) | Transport that carries Zyris directly between two nodes. |
 
 Each is also a crate of its own. Depending on one directly *and* on this one is not a mistake and
@@ -57,7 +56,7 @@ links nothing twice — the module here **is** that crate.
 what depending on the runtime alone does.
 
 - **Runtime:** `client`, `enroll`, `hostname`, `axum`, `testing`
-- **Stack:** `caps`, `attacca`, `p2p`, and `full` for all three plus `enroll`
+- **Stack:** `caps`, `p2p`, and `full` for both plus `enroll`
 
 **Implementations are not here.** The repository's `zyris-capkit` has reference ones and is not
 published: a node decides what it offers, and a crate that pins a git fork of `enigo` could not go

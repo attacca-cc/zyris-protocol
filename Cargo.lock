@@ -6472,7 +6472,6 @@ name = "zyris"
 version = "0.2.0"
 dependencies = [
  "tokio",
- "zyris-attacca",
  "zyris-caps",
  "zyris-core",
  "zyris-p2p",
@@ -6566,6 +6565,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zyris",
+ "zyris-attacca",
  "zyris-capkit",
 ]
 

@@ -10,8 +10,9 @@ It lives in the [Zyris](https://github.com/attacca-cc/zyris-protocol) repository
 Attacca because a node author needs this declaration and nothing else — not Attacca's domain, its
 database, or its message bus.
 
-Re-exported as `zyris::attacca` when [`zyris`](https://crates.io/crates/zyris) is built with the
-`attacca` feature.
+Named directly, not reached through [`zyris`](https://crates.io/crates/zyris). Attacca is one
+deployment rather than the protocol, so the face does not carry it: a node that calls Attacca back
+lists this crate as a dependency of its own, alongside `zyris`.
 
 ## License
 
