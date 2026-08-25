@@ -78,9 +78,15 @@ Doc comments become the tool and field descriptions a model reads, so write them
 
 ## Where to start
 
-[`zyris-hello`](https://github.com/attacca-cc/zyris-protocol/tree/main/crates/zyris-hello) is a
-complete node in two short files — the thing to copy. It is not published to crates.io on purpose:
-it is a crate to edit, not a binary to install.
+[`examples/hello.rs`](examples/hello.rs) is the whole library in one runnable file: declare a
+capability, take a node, serve it, answer "Hello World" when a model calls it.
+
+```bash
+cargo run -p zyris --example hello --features enroll
+```
+
+For a node with more in it — a credential stored on disk, file transfer, screen capture and input
+— read [`ridanit-ruma/zyris-hello`](https://github.com/ridanit-ruma/zyris-hello).
 
 [`docs/zyris-protocol.md`](https://github.com/attacca-cc/zyris-protocol/blob/main/docs/zyris-protocol.md)
 is the normative wire reference.

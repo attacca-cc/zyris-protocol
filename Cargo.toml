@@ -6,7 +6,6 @@ members = [
     "crates/zyris-attacca",
     "crates/zyris-capkit",
     "crates/zyris-caps",
-    "crates/zyris-hello",
     "crates/zyris-macros",
     "crates/zyris-p2p",
     "crates/zyris-proto",
