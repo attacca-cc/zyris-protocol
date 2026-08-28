@@ -26,10 +26,16 @@ implementation in. Add the ones you want — `zyris-fs`, `zyris-terminal`, `zyri
 `zyris-screen` — the way `ratatui-crossterm` is added beside `ratatui`. Only `zyris-input` is
 git-only, and only because of the `enigo` fork it pins.
 
-`default` is a node that can dial and name itself, and costs what `zyris-core` alone costs. `caps`
-adds the standard capability declarations; `enroll` adds the 8-character-code flow and the account
-layer below. Neither is on by default, because a node holding a `znt_` token out of a secret
-manager needs neither.
+`default` is a node that can announce, accept and name itself, and costs what `zyris-core` alone
+costs — a Rust toolchain and nothing else, no C compiler. **It cannot reach a `wss://` server**:
+rustls picks its cryptography from crate features, none of them is on here, and a dial with no
+provider is refused by name (`ConnectError::NoTlsProvider`) rather than left to panic. Add
+`tls-ring` for it, or `tls-aws-lc` to override the choice. Both compile C, which is the whole
+reason neither is on by default.
+
+`caps` adds the standard capability declarations; `enroll` adds the 8-character-code flow and the
+account layer below, and implies `tls-ring` because a device grant is an HTTPS exchange. Neither is
+on by default, because a node holding a `znt_` token out of a secret manager needs neither.
 
 ```rust
 use zyris::{Node, NodeKind};

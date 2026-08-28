@@ -47,8 +47,14 @@ p2p = ["dep:zyris-p2p"]
 # Every layer this crate has a module for, plus enrollment. **The reference implementations are not
 # one of them and never will be**: what a node offers is the node's decision, so a node that wants
 # `PtyTerminal` or `LocalFileIo` adds `zyris-terminal` or `zyris-fs` beside this crate, the way
-# `ratatui-crossterm` is added beside `ratatui`. `full` also names no TLS provider — that is a
-# choice with a build cost and this feature does not get to make it for you.
+# `ratatui-crossterm` is added beside `ratatui`.
+#
+# **This is the line that costs a C compiler.** `enroll` is `["dep:reqwest", "tls-ring"]` one layer
+# down, so `full` names a TLS provider whether or not you meant to, and `p2p` reaches one again
+# through iroh. An earlier version of this comment claimed the opposite — that `full` left the
+# provider to you — and it was wrong in the direction that costs a reader a failed build: the
+# toolchain-free graph is `default`, not `full`. `tests/toolchain_cost.rs` measures both so the
+# sentence cannot drift away from the manifest again.
 full = ["caps", "enroll", "p2p"]
 
 [dev-dependencies]

@@ -144,3 +144,30 @@ fn naming_a_tls_provider_is_what_costs_a_c_compiler() {
     );
 }
 
+/// What `full` costs, because the comment on that feature used to say it cost nothing.
+///
+/// `full` is `caps + enroll + p2p`, and `enroll` is `["dep:reqwest", "tls-ring"]` one layer down —
+/// so `full` names a TLS provider whatever else it does. The sentence that said this feature "does
+/// not get to make [that] choice for you" was false from the day `enroll` grew its provider, and it
+/// was false in the direction that costs a reader a failed build: someone wanting the
+/// toolchain-free graph reads `full` as *more of the same* rather than as the line that crosses it.
+/// `default` is that graph, and the test above is what holds it.
+#[test]
+fn full_pays_for_a_c_compiler_and_the_cheaper_provider() {
+    assert!(
+        reaches(&["full"], "ring") && reaches(&["full"], "cc"),
+        "`full` no longer reaches a C toolchain. That is a real change and a welcome one, but the \
+         comment on `full` in this crate's Cargo.toml describes the old cost — move it before \
+         deleting this test"
+    );
+    // Still the cheaper of the two. `enroll` and `p2p` both reach rustls, and either one switching
+    // to aws-lc would put `cmake` in front of every consumer who typed `--features full`.
+    for package in ["aws-lc-sys", "cmake"] {
+        assert!(
+            !reaches(&["full"], package),
+            "`cargo add zyris --features full` pulls `{package}`, so the whole feature now wants \
+             `cmake` off aws-lc-sys's nine named targets. `cargo tree -p zyris --features full \
+             --target all -i {package}` names the path."
+        );
+    }
+}
