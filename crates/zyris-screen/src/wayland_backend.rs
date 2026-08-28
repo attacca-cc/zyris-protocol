@@ -10,15 +10,32 @@ use zyris_caps::{display_scale, no_such_display, Display};
 
 use super::internal;
 
+/// The registry name of the protocol this backend is built on. Compared as a string because the
+/// question is whether the compositor advertises it at all, which the registry answers without
+/// binding anything and therefore without taking a frame.
+const SCREENCOPY: &str = "zwlr_screencopy_manager_v1";
+
 /// Whether this session has a compositor that will hand over pixels.
 ///
 /// GNOME and KDE do not implement `zwlr_screencopy`; they screenshot through a portal, which is
 /// what the `xcap` backend already knows how to reach.
+///
+/// **Opening a connection and seeing outputs is a different question, and answering that one was a
+/// bug.** `wl_output` is core Wayland, so on GNOME the connection opens and every monitor is
+/// listed; the screencopy manager is bound later, inside the capture, and only there does it fail
+/// with `ProtocolNotFound`. So this said yes on exactly the compositors the paragraph above says it
+/// excludes, [`ScreenBackend::detect`] committed to this backend, and every screenshot the node
+/// served failed — with a message about a wayland protocol, on a desktop that screenshots fine.
+///
+/// [`ScreenBackend::detect`]: super::ScreenBackend::detect
 pub(super) fn is_available() -> bool {
-    match WayshotConnection::new() {
-        Ok(conn) => !conn.get_all_outputs().is_empty(),
-        Err(_) => false,
+    let Ok(conn) = WayshotConnection::new() else { return false };
+    if conn.get_all_outputs().is_empty() {
+        return false;
     }
+    conn.globals.contents().with_list(|globals| {
+        globals.iter().any(|global| global.interface == SCREENCOPY)
+    })
 }
 
 /// Wayland has no notion of a primary output, so the one covering the origin stands in. That is
@@ -93,3 +110,35 @@ pub(super) fn capture(display: Option<&str>) -> zyris::Result<(String, RgbaImage
     Ok((output.name.clone(), image.into_rgba8()))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Saying this backend is available is a promise that a capture will work.
+    ///
+    /// The two questions came apart on GNOME: `wl_output` is core Wayland, so the connection opened
+    /// and every monitor was listed, and the missing piece — `zwlr_screencopy` — was only ever
+    /// looked for inside the capture. `detect` committed to this backend and every screenshot the
+    /// node served failed. So the assertion is the promise itself rather than the mechanism: if
+    /// this session says yes, taking a picture has to work.
+    ///
+    /// A compositor without the protocol reaches the `if` and stops, which is the whole point —
+    /// there is nothing to capture and nothing to wait for. On one that has it this takes a frame,
+    /// once, and that is the only place in this suite where the promise can actually be tested.
+    #[test]
+    fn saying_yes_here_means_a_capture_will_work() {
+        if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            return;
+        }
+        if is_available() {
+            let taken = capture(None);
+            assert!(
+                taken.is_ok(),
+                "this session advertises {SCREENCOPY} and `is_available` said yes, but capturing \
+                 failed with {:?} — the probe and the capture disagree, which is the state that \
+                 made every screenshot on GNOME fail",
+                taken.err()
+            );
+        }
+    }
+}

@@ -26,6 +26,25 @@ fn monitor_name(monitor: &Monitor) -> String {
 /// reports Quartz points. Both capture in physical pixels, and so does `input.move_to` — see
 /// `EnigoInput` in `zyris-input` — so undo the division here rather than leaving two spaces loose
 /// in the crate. Windows reports `dmPelsWidth` and a `dmPosition` that are physical already.
+///
+/// # Known wrong on GNOME's XWayland at a fractional scale
+///
+/// Measured 2026-08-28, one 1920x1080 panel at 125%:
+///
+/// ```text
+/// xcap reports    2457x1382, scale_factor 1.25
+/// this function   3071x1728
+/// a capture is    1920x1080     <- the panel, and what a caller actually receives
+/// ```
+///
+/// Three numbers, and multiplying moved away from the right one rather than towards it — so the
+/// premise above does not hold there: whatever `2457x1382` is, it is not RandR geometry divided by
+/// `1.25`. `tests/screen.rs` fails on such a session and is **deliberately left failing**. The
+/// assertion is the contract — a display's advertised size is the size of its picture — so it is
+/// this function that is wrong, and a test edited into passing would hide it.
+///
+/// Fixing it needs `xcap` measured on X11, XWayland, GNOME, KDE and macOS rather than reasoned
+/// about from one laptop; reasoning from one laptop is what produced this line.
 #[cfg(not(target_os = "windows"))]
 fn to_physical(display: Display) -> Display {
     let factor = display_scale(display.scale_factor);
