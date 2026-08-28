@@ -1,0 +1,49 @@
+[package]
+name = "zyris-screen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The reference screen_capture implementation for Zyris: xcap and wlroots"
+readme = "README.md"
+keywords = ["zyris", "screenshot", "wayland", "xcap", "capability"]
+categories = ["network-programming", "os", "api-bindings"]
+
+# No features. `ScreenBackend::detect` chooses between the two Linux paths at runtime, and
+# `libwayshot` arrives through `xcap` on Linux either way, so a `wayland` feature would gate
+# nothing that is not already being built. `async_trait` is not listed because the
+# `#[zyris::async_trait]` attribute reaches it through `::zyris::`, the same way `zyris-caps` does.
+[dependencies]
+# Cropping, downscaling and the two encoders. Only the formats `ImageFormat` can name are built.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# `spawn_blocking`, and nothing else: both backends are blocking and hold platform connections
+# that are not worth keeping across an await. No runtime feature — the runtime is the node
+# program's to choose.
+tokio = { workspace = true, features = ["rt"] }
+# One line: the warning for a capture that will not fit its budget even at the minimum width.
+tracing.workspace = true
+xcap = "0.9.7"
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false }
+zyris-caps = { version = "0.2.0", path = "../zyris-caps" }
+
+# `xcap` enumerates monitors over XRandR even in a Wayland session, then captures in Wayland's
+# coordinate space; the two disagree whenever Xwayland cannot express the compositor's layout. The
+# Wayland backend goes straight to `wl_output`. This is the fork `xcap` itself depends on, so it
+# costs no extra copy of the Wayland stack.
+[target.'cfg(target_os = "linux")'.dependencies]
+libwayshot = { package = "libwayshot-xcap", version = "0.3.3" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+# `zyris::testing::duplex` — two real Connections over a channel, which is how the tests drive a
+# client against this implementation without a socket. It is a non-default feature, and a
+# dev-dependency is the only place a test can turn one on for a crate already depended on above.
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false, features = ["testing"] }
+
+[package.metadata.docs.rs]
+# docs.rs builds Linux by default and cannot build this crate there: `xcap` wants libclang, a
+# pkg-config probe and the X11/Wayland development headers, and the doc builder has none of them.
+# The result is not a missing page but a permanently red one, which to a stranger reads as an
+# abandoned crate. On Windows and macOS this crate is pure Rust, so the documentation is built
+# there and describes the same API.
+default-target = "x86_64-pc-windows-msvc"

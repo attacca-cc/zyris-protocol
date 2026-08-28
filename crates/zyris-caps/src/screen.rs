@@ -1,6 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use zyris::Datum;
+use zyris::{Datum, WireError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Display {
@@ -95,4 +95,52 @@ pub trait ScreenCapture {
         format: Option<ImageFormat>,
         max_width: Option<u32>,
     ) -> zyris::Result<Datum>;
+}
+
+// --- What two implementations of `screen_capture` have to agree on ---
+//
+// These are not behaviour and they are not an example: they are the part of the declaration that
+// cannot live in prose. `screen_capture` enumerates displays itself and `input` does not, so the
+// two capabilities are implemented in separate crates that must not depend on each other — and
+// both need to say what a display layout *is*, what a missing one answers, and what a scale of
+// zero means. Duplicated per implementation, the zero-scale guard would exist in one backend and
+// not the other, which is the class of bug it was written to prevent. So they sit here, beside the
+// `Display` they are about, in the crate both implementations already depend on.
+
+/// Something that can report the monitor layout.
+///
+/// Blocking on purpose — every caller is already inside `spawn_blocking`, and the platform APIs
+/// underneath are blocking anyway.
+pub trait Displays: Send + Sync + 'static {
+    fn displays(&self) -> zyris::Result<Vec<Display>>;
+}
+
+/// A layout that does not change: tests, and nodes that know their monitors up front.
+impl Displays for Vec<Display> {
+    fn displays(&self) -> zyris::Result<Vec<Display>> {
+        Ok(self.clone())
+    }
+}
+
+/// The one answer to "that display is not here", so two implementations cannot word it differently.
+pub fn no_such_display(wanted: &str) -> WireError {
+    WireError::invalid_params(format!("no display matches `{wanted}`"))
+}
+
+/// The scale factor to actually divide or multiply by.
+///
+/// A display with no scale is not a display scaled by zero, but that is what reaches us: `xcap`
+/// reduces over an empty output list in its Wayland branch and hands back `0.0`. Every conversion
+/// built on that either divides by zero or collapses the layout onto the origin, which is the same
+/// class of wrong position this guard exists to prevent.
+///
+/// Ungated, unlike the `#[cfg(any(feature = "screen", target_os = "macos"))]` it carried inside the
+/// implementations: `input` needs it on macOS too, and a declarations crate has no feature to hang
+/// it on.
+pub fn display_scale(scale_factor: f32) -> f32 {
+    if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    }
 }

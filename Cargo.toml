@@ -2,20 +2,25 @@
 resolver = "3"
 members = [
     "crates/zyris",
+    "crates/zyris-core",
     "crates/zyris-attacca",
     "crates/zyris-capkit",
     "crates/zyris-caps",
-    "crates/zyris-hello",
+    "crates/zyris-fs",
+    "crates/zyris-input",
+    "crates/zyris-screen",
+    "crates/zyris-terminal",
+    "crates/zyris-transfer",
     "crates/zyris-macros",
     "crates/zyris-p2p",
     "crates/zyris-proto",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/attacca-cc/zyris"
+repository = "https://github.com/attacca-cc/zyris-protocol"
 
 [workspace.dependencies]
 async-trait = "0.1.91"

@@ -4,53 +4,85 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Zyris node runtime and client"
+description = "The Zyris protocol stack behind one name: a library you call to connect a node, announce typed capabilities, and use the ones the peer announces back"
+keywords = ["zyris", "protocol", "node", "capabilities", "agent"]
+categories = ["network-programming", "asynchronous", "api-bindings"]
+readme = "README.md"
 
 [dependencies]
-async-trait.workspace = true
-axum = { workspace = true, features = ["ws"], optional = true }
-bytes.workspace = true
-futures-util.workspace = true
-gethostname = { version = "1.1.0", optional = true }
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "http2", "charset"], optional = true }
-schemars.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
-thiserror.workspace = true
-tokio = { workspace = true, features = ["rt", "sync", "macros", "time", "io-util"] }
-tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"], optional = true }
-tracing.workspace = true
-uuid.workspace = true
-zyris-macros = { version = "0.1.0", path = "../zyris-macros" }
-zyris-proto = { version = "0.1.0", path = "../zyris-proto" }
+# The core this crate is a face for. Everything it exports is re-exported from the root, so
+# `use zyris::Node` names the same type whether a crate reaches it through here or through
+# `zyris-core` directly — the layers below this one do the latter, because a crate cannot depend on
+# something that depends on it.
+zyris-core = { version = "0.2.0", path = "../zyris-core", default-features = false }
+zyris-caps = { version = "0.2.0", path = "../zyris-caps", optional = true }
+zyris-p2p = { version = "0.2.0", path = "../zyris-p2p", optional = true }
 
 [features]
-default = ["client", "hostname", "persistence", "runtime"]
-client = ["dep:tokio-tungstenite"]
-# Config, credential hooks, and the dial/reconnect loop — everything between "I have a capability"
-# and "I am a running node". On by default because writing that loop per node is four chances to
-# get backoff, credential rotation, or an exit code subtly wrong; the only cost is `tokio/signal`.
-runtime = ["client", "tokio/signal"]
-axum = ["dep:axum"]
-testing = []
-# Self-registration over the RFC 8628 device grant. Off by default so a node using a static `znt_`
-# pays nothing for it. The marginal cost when it is on is smaller than it looks: `client` already
-# pulls rustls and the native root store through `tokio-tungstenite`, so `reqwest` reuses that TLS
-# stack and only adds the hyper/tower layer.
-enroll = ["dep:reqwest"]
-# Name the node after the machine it runs on. On by default because a node that names itself is the
-# difference between zero configuration and one more variable to get wrong; `gethostname` is a thin
-# wrapper over `gethostname(2)`/`GetComputerNameExW` and adds nothing transitive.
-hostname = ["dep:gethostname"]
-# The on-disk `CredentialStore` backend. Orthogonal to `enroll`: the trait and the in-memory backend
-# are always compiled, so a node can keep its credentials in a keychain or a k8s Secret by turning
-# this off and supplying its own.
-persistence = []
+# The same default as `zyris-core`: a node that can dial and name itself. Nothing above the core
+# is on, so `cargo add zyris` costs what depending on `zyris-core` alone does.
+default = ["client", "hostname"]
+
+# --- The core. One line each, forwarded to `zyris-core`; see that crate for what they buy. ---
+axum = ["zyris-core/axum"]
+client = ["zyris-core/client"]
+enroll = ["zyris-core/enroll"]
+hostname = ["zyris-core/hostname"]
+testing = ["zyris-core/testing"]
+# The TLS provider, which nothing else can choose for you. Rustls reads its crate features and, if
+# none of them names a provider, panics on the first `wss://` — so this crate refuses that dial by
+# name instead (`ConnectError::NoTlsProvider`). Off by default because both providers compile C and
+# `cargo add zyris` has to keep building on a machine with no toolchain; the price of dialling is
+# one of these two, and `tls-ring` is the cheaper (a `cc` build, where `tls-aws-lc` also wants
+# `cmake` off its nine named targets).
+tls-ring = ["zyris-core/tls-ring"]
+tls-aws-lc = ["zyris-core/tls-aws-lc"]
+
+# --- The stack. Each one adds a module at the root of this crate. ---
+# Declarations only — no tokio, no OS libraries.
+caps = ["dep:zyris-caps"]
+# Node-to-node QUIC transport.
+p2p = ["dep:zyris-p2p"]
+
+# Every layer this crate has a module for, plus enrollment. **The reference implementations are not
+# one of them and never will be**: what a node offers is the node's decision, so a node that wants
+# `PtyTerminal` or `LocalFileIo` adds `zyris-terminal` or `zyris-fs` beside this crate, the way
+# `ratatui-crossterm` is added beside `ratatui`.
+#
+# **This is the line that costs a C compiler.** `enroll` is `["dep:reqwest", "tls-ring"]` one layer
+# down, so `full` names a TLS provider whether or not you meant to, and `p2p` reaches one again
+# through iroh. An earlier version of this comment claimed the opposite — that `full` left the
+# provider to you — and it was wrong in the direction that costs a reader a failed build: the
+# toolchain-free graph is `default`, not `full`. `tests/toolchain_cost.rs` measures both so the
+# sentence cannot drift away from the manifest again.
+full = ["caps", "enroll", "p2p"]
 
 [dev-dependencies]
-tempfile.workspace = true
-# Installs the commit hook into `.git/hooks` the first time `cargo test` runs
-# (Rust counterpart of simple-git-hooks). Hook scripts live in `.cargo-husky/hooks/`;
-# the `commit-msg` one enforces Conventional Commits. Set
-# CARGO_HUSKY_DONT_INSTALL_HOOKS=true to skip installation.
-cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }
+# For the example below. A crate cannot hand out an async runtime, so the one place this repo
+# names tokio in the face is a target that is not part of the published library.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+
+[[example]]
+# The whole of Zyris in one file: declare a capability, take a node, serve it. An example rather
+# than a test so that a person can run it against a deployment, and `cargo test` compiles it
+# either way, which is what makes it a regression guard as well as the documentation.
+name = "hello"
+required-features = ["enroll"]
+
+[[example]]
+# Proof that the whole flow — enrol, register a node, connect — is reachable through this crate
+# alone. It is an example rather than a test so that a person can run it against a deployment,
+# and `cargo test` compiles it either way, which is what makes it a regression guard.
+name = "facade_probe"
+required-features = ["enroll"]
+
+[package.metadata.docs.rs]
+# `full` is every feature this crate has; it is spelled out rather than `all-features = true` so
+# that adding a feature with a build requirement does not silently start failing the doc build.
+features = ["full"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.rust]
+# `docsrs` is set by docs.rs, and by nothing else. Declaring it here keeps a local
+# `cargo doc` from warning about a cfg it has never heard of.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }

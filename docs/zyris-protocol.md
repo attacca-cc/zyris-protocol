@@ -17,10 +17,15 @@ worked example.
 
 ## 0. Writing a node
 
-`crates/zyris-hello` is a complete, runnable node in two short files — one capability with one
-tool, plus the connect/reconnect loop and the consume side. Start there; this document is the
-normative wire reference, not a tutorial. See `crates/zyris-hello/README.md` for how to run it
-against a local server.
+`crates/zyris/examples/hello.rs` is a complete, runnable node in one file — one capability with
+one tool, plus enrollment, node registration and the connection. Start there; this document is the
+normative wire reference, not a tutorial. Run it with
+
+```bash
+cargo run -p zyris --example hello --features enroll
+```
+
+and point it at a local server with `ZYRIS_SERVER_URL`.
 
 ## 1. Transport and framing
 
@@ -318,8 +323,14 @@ same mechanism mirrored and are not implemented yet.
 ## 7. Node identity, enrollment, presence
 
 Enrollment is out-of-band: it happens over HTTP before the websocket exists, so none of it is on the
-Zyris wire. It is documented here because `zyris::runtime` ships an implementation of it, and
-because a node author has to choose a credential source before anything else works.
+Zyris wire. It is documented here because `zyris` implements this half of it too, and because a node
+author has to choose a credential source before anything else works.
+
+**The library holds no credential of its own and picks no path to keep one at.** Every step hands its
+result back as a value: `enroll()` returns an `Enrollment` whose `code()` is a `Code` to display,
+`Enrollment::wait` returns an `AccountCredential`, and `Account::register_node` returns a `NodeToken`.
+Storing them — a file, a keychain, a Kubernetes Secret, a database row — is the caller's, and so is
+whether a code becomes a printed block, a window in a TUI, or a line in a journal.
 
 - **Enrollment (device grant, default)**: the node starts unconfigured and runs RFC 8628. It
   `POST`s `/zyris/v1/device/authorize`, prints an 8-character base-20 code, and polls
@@ -332,19 +343,27 @@ because a node author has to choose a credential source before anything else wor
   `wss://attacca.cc/api/zyris/v1/ws`, and the HTTP base for the device endpoints is derived from it
   by truncating at `/zyris/`, so a node cannot enroll against one deployment while connecting to
   another.
-- **Where the bearer comes from**: the `Credentials` trait, one call immediately before every dial.
-  Three implementations ship (`zyris::runtime`, default feature `runtime`): `StaticToken`
-  (`$ZYRIS_NODE_TOKEN`), `TokenFile` (`$ZYRIS_NODE_TOKEN_FILE`, re-read per dial so a rotated k8s
-  Secret needs no restart), and `DeviceGrant`. `runtime::credentials::from_env` picks between them,
-  most explicit first — enrollment is last because it is the only one that can block on a human.
-  The same feature owns the dial/reconnect loop: backoff with jitter, reset after a healthy
-  connection, one forced credential rotation on a refusal, graceful `Ctrl-C`, and exit code 2 for
-  anything a person has to resolve so a supervisor does not restart-loop printing codes.
-- **Credential storage**: where the issued pair lives between runs is the `CredentialStore` trait,
-  not a path. The default (`FileCredentialStore`, behind the `persistence` feature) is one `0600`
-  file per `(deployment, profile)` under the user's config dir, written atomically and *refused* if
-  its mode is group- or world-readable. A node that keeps credentials in a keychain or a k8s Secret
-  implements the trait and passes it to `Enroller::new`.
+- **Where the bearer comes from**: `Node::connect(url, token)` and `Node::dial(url, token)` take any
+  bearer string, so a node provisioned with a `znt_` out of a secret manager never touches the
+  enrollment code at all. A node that enrolled instead mints its bearer from what enrollment issued:
+  `Account::restore(server_url, credential)` picks the pair back up, and `Account::register_node`
+  returns a `NodeToken` to dial with. `Account` is behind the `enroll` feature, which is not on by
+  default — the static-token path costs nothing for the device grant it never runs.
+- **Rotation**: only the account credential rotates; a `znt_` node token is static and is never
+  handed back. `Account` refreshes the pair on its own schedule (at 80% of the access token's
+  lifetime, not at expiry) and hands each new pair to the async `on_rotate` hook the caller
+  installed. **The hook has to succeed before the library adopts the new pair.** A refresh token is
+  single-use: if a process began presenting a pair that never reached the caller's storage, its next
+  start would present the spent one, and Attacca reads a replay past its 30-second grace as a leaked
+  chain and revokes every node under that credential. Rotating early is what makes waiting for the
+  hook safe — there are roughly twelve minutes of slack in which it can fail without stopping a dial,
+  and a failure inside that window is logged and the credential still held is carried on with.
+- **Staying connected**: `Node::connect` returns a `Link` that owns the dial-and-reconnect loop —
+  backoff with jitter, reset after a healthy connection — and returns as soon as the first dial has
+  settled. A refusal no retry can fix (`Revoked`, `Unauthorized`, `VersionMismatch`) is that call's
+  error; anything else is the link's problem and it goes on trying. `Link::wait_closed` resolves when
+  the link is finished and `Link::disconnect` ends it, giving the closing frame time to land. There
+  is no signal handler and no exit code: when the process stops is the program's decision.
 - **Enrollment (static token)**: the user creates a node in the web UI and the server mints a
   one-time-displayed token (prefix retained for display, hash stored, scopes attached). Daemon
   config is `{ server_url, node_token }`. Retained for provisioning with no human in the loop —

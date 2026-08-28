@@ -1,0 +1,86 @@
+[package]
+name = "zyris-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Zyris node runtime and client"
+readme = "README.md"
+keywords = ["zyris", "protocol", "node", "websocket", "runtime"]
+categories = ["network-programming", "asynchronous", "web-programming::websocket"]
+
+[dependencies]
+async-trait.workspace = true
+axum = { workspace = true, features = ["ws"], optional = true }
+bytes.workspace = true
+futures-util.workspace = true
+gethostname = { version = "1.1.0", optional = true }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider", "http2", "charset"], optional = true }
+# Already in the graph through `tokio-tungstenite`; named here so this crate can choose the
+# provider rather than inherit whichever one some other crate happened to switch on, and so
+# `CryptoProvider::get_default()` can be asked at all.
+rustls = { version = "0.23", default-features = false, features = ["std"], optional = true }
+schemars.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "macros", "time", "io-util"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"], optional = true }
+tracing.workspace = true
+uuid.workspace = true
+zyris-macros = { version = "0.2.0", path = "../zyris-macros" }
+zyris-proto = { version = "0.2.0", path = "../zyris-proto" }
+
+[features]
+default = ["client", "hostname"]
+# The websocket dialer, and with it `Node::connect` and the reconnect loop behind `Link`. No
+# `tokio/signal`: when a node stops is the program's decision, not this crate's.
+client = ["dep:tokio-tungstenite", "dep:rustls"]
+axum = ["dep:axum"]
+testing = []
+# Self-registration over the RFC 8628 device grant, and the `Account` layer that mints node tokens
+# from what it issues. Off by default so a node using a static `znt_` pays nothing for them. The
+# marginal cost when it is on is smaller than it looks: `client` already pulls rustls and the
+# native root store through `tokio-tungstenite`, so `reqwest` reuses that TLS stack and only adds
+# the hyper/tower layer. It takes `rustls-no-provider` rather than `rustls` for that reason too:
+# the latter means `aws-lc-rs`, and turning a provider on here would decide for the whole graph
+# from a feature that is about enrolment.
+# `tls-ring` is not optional here and that is the honest shape: enrolment is an HTTPS device-grant
+# flow, so a build that can enrol without TLS does not exist. `reqwest` on `rustls-no-provider`
+# panics while *building its client* rather than on a request, so leaving the choice to the caller
+# would move a runtime panic to a place with even less context than the dial had. Naming
+# `tls-aws-lc` as well overrides it; see the provider block below.
+enroll = ["dep:reqwest", "tls-ring"]
+# --- TLS providers. Exactly one of these is what makes `wss://` dial. ---
+# Rustls has no provider of its own: it reads its crate features and, if they name none, panics on
+# the first connection from a line no `compile_error!` guards. Neither of these is on by default,
+# because both compile C — `ring` and `aws-lc-sys` each carry a build script that needs a working
+# `cc` — and `cargo add zyris` has to stay buildable on a machine that has none. What that build
+# cannot do is dial, and `ConnectError::NoTlsProvider` says so by name instead of panicking.
+#
+# `ring` is the lighter of the two and what most of the ecosystem already links. `aws-lc-rs` is
+# the deliberate choice; when both are on it wins, because nobody turns it on by accident whereas
+# `ring` arrives through other crates all the time, and silently downgrading someone who asked for
+# it would be the worse mistake.
+tls-ring = ["dep:rustls", "rustls/ring"]
+tls-aws-lc = ["dep:rustls", "rustls/aws-lc-rs"]
+# Name the node after the machine it runs on. On by default because a node that names itself is the
+# difference between zero configuration and one more variable to get wrong; `gethostname` is a thin
+# wrapper over `gethostname(2)`/`GetComputerNameExW` and adds nothing transitive.
+hostname = ["dep:gethostname"]
+
+[dev-dependencies]
+# The face, so the tests and doctests here are written the way a node author writes them —
+# `use zyris::…` — and the paths `#[zyris::capability]` generates resolve. A dev-dependency may
+# point back at a crate that depends on this one: Cargo forbids cycles only among normal
+# dependencies, and a path-only dev-dependency is stripped from the published manifest.
+# `zyris-macros` has depended back on this crate the same way since before the split.
+zyris = { path = "../zyris" }
+# Installs the commit hook into `.git/hooks` the first time `cargo test` runs
+# (Rust counterpart of simple-git-hooks). Hook scripts live in `.cargo-husky/hooks/`;
+# the `commit-msg` one enforces Conventional Commits. Set
+# CARGO_HUSKY_DONT_INSTALL_HOOKS=true to skip installation.
+cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }
+
+[package.metadata.docs.rs]
+all-features = true

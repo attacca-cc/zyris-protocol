@@ -3857,63 +3857,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quinn"
-version = "0.11.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c1a41e437b6bbd489372cd4971de128e85c855f56c57f283d20ff016cf7c0a8"
-dependencies = [
- "bytes",
- "cfg_aliases 0.2.2",
- "pin-project-lite",
- "quinn-proto",
- "quinn-udp",
- "rustc-hash",
- "rustls",
- "socket2",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "web-time",
-]
-
-[[package]]
-name = "quinn-proto"
-version = "0.11.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f4bfc015262b9df63c8845072ce59068853ff5872180c2ce2f13038b970e560"
-dependencies = [
- "aws-lc-rs",
- "bytes",
- "getrandom 0.4.3",
- "lru-slab",
- "rand 0.10.2",
- "rand_pcg",
- "ring",
- "rustc-hash",
- "rustls",
- "rustls-pki-types",
- "slab",
- "thiserror 2.0.19",
- "tinyvec",
- "tracing",
- "web-time",
-]
-
-[[package]]
-name = "quinn-udp"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
-dependencies = [
- "cfg_aliases 0.2.2",
- "libc",
- "once_cell",
- "socket2",
- "tracing",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4112,7 +4055,6 @@ dependencies = [
  "mime",
  "percent-encoding",
  "pin-project-lite",
- "quinn",
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
@@ -6469,7 +6411,51 @@ dependencies = [
 
 [[package]]
 name = "zyris"
-version = "0.1.0"
+version = "0.2.0"
+dependencies = [
+ "tokio",
+ "zyris-caps",
+ "zyris-core",
+ "zyris-p2p",
+]
+
+[[package]]
+name = "zyris-attacca"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "zyris-core",
+]
+
+[[package]]
+name = "zyris-capkit"
+version = "0.2.0"
+dependencies = [
+ "zyris-caps",
+ "zyris-fs",
+ "zyris-input",
+ "zyris-screen",
+ "zyris-terminal",
+ "zyris-transfer",
+]
+
+[[package]]
+name = "zyris-caps"
+version = "0.2.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "zyris-core",
+]
+
+[[package]]
+name = "zyris-core"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -6478,91 +6464,45 @@ dependencies = [
  "futures-util",
  "gethostname",
  "reqwest",
+ "rustls",
  "schemars",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tokio-tungstenite",
  "tracing",
  "uuid",
+ "zyris",
  "zyris-macros",
  "zyris-proto",
 ]
 
 [[package]]
-name = "zyris-attacca"
-version = "0.1.0"
+name = "zyris-fs"
+version = "0.2.0"
 dependencies = [
- "futures-util",
- "schemars",
- "serde",
- "serde_json",
- "tokio",
- "zyris",
-]
-
-[[package]]
-name = "zyris-capkit"
-version = "0.1.0"
-dependencies = [
- "async-trait",
  "bytes",
- "enigo",
  "futures-util",
- "hex",
- "image",
- "iroh",
- "libc",
- "libwayshot-xcap",
- "portable-pty",
- "serde",
- "serde_json",
- "sha2 0.10.9",
  "tempfile",
  "tokio",
- "tracing",
- "vt100",
- "xcap",
- "zyris",
- "zyris-attacca",
  "zyris-caps",
- "zyris-p2p",
+ "zyris-core",
 ]
 
 [[package]]
-name = "zyris-caps"
-version = "0.1.0"
+name = "zyris-input"
+version = "0.2.0"
 dependencies = [
- "schemars",
- "serde",
- "serde_json",
- "zyris",
-]
-
-[[package]]
-name = "zyris-hello"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "rand 0.9.5",
- "schemars",
- "serde",
+ "enigo",
  "tokio",
- "tracing",
- "tracing-subscriber",
- "zyris",
- "zyris-attacca",
- "zyris-capkit",
  "zyris-caps",
- "zyris-p2p",
+ "zyris-core",
 ]
 
 [[package]]
 name = "zyris-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6570,12 +6510,12 @@ dependencies = [
  "serde",
  "syn 3.0.3",
  "trybuild",
- "zyris",
+ "zyris-core",
 ]
 
 [[package]]
 name = "zyris-p2p"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6589,13 +6529,13 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tracing",
- "zyris",
+ "zyris-core",
  "zyris-proto",
 ]
 
 [[package]]
 name = "zyris-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.23.0",
  "bytes",
@@ -6606,4 +6546,54 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "zyris-screen"
+version = "0.2.0"
+dependencies = [
+ "image",
+ "libwayshot-xcap",
+ "tokio",
+ "tracing",
+ "xcap",
+ "zyris-caps",
+ "zyris-core",
+]
+
+[[package]]
+name = "zyris-terminal"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "libc",
+ "portable-pty",
+ "tempfile",
+ "tokio",
+ "vt100",
+ "zyris-caps",
+ "zyris-core",
+]
+
+[[package]]
+name = "zyris-transfer"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "hex",
+ "iroh",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "zyris-attacca",
+ "zyris-caps",
+ "zyris-core",
+ "zyris-p2p",
 ]

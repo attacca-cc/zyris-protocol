@@ -1,0 +1,37 @@
+[package]
+name = "zyris-fs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The reference file_io implementation for Zyris: local files under a root"
+readme = "README.md"
+keywords = ["zyris", "filesystem", "file-io", "tokio", "capability"]
+categories = ["filesystem", "network-programming", "api-bindings"]
+
+# No features. This crate is one implementation of one capability, and every dependency below is
+# something all of it needs — gating any of them would only produce a build that cannot serve
+# `file_io` at all. `async_trait` is not listed because the `#[zyris::async_trait]` attribute
+# reaches it through `::zyris::`, the same way `zyris-caps` does.
+[dependencies]
+# `Datum::File`/`Image` arrive as `Blob::Inline(Bytes)`, and `read_stream` hands each chunk back as
+# one.
+bytes.workspace = true
+# `stream::unfold` builds the chunked body of `read_stream`.
+futures-util.workspace = true
+# `fs` for the filesystem calls, `io-util` for the `AsyncReadExt`/`AsyncSeekExt` that paging a read
+# by `offset` needs. No runtime feature: the runtime is the node program's to choose.
+tokio = { workspace = true, features = ["fs", "io-util"] }
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false }
+zyris-caps = { version = "0.2.0", path = "../zyris-caps" }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+# `zyris::testing::duplex` — two real Connections over a channel, which is how every test here
+# drives a client against the server without a socket. `testing` is a non-default feature, and a
+# dev-dependency is the only place a test can turn one on for a crate already depended on above.
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false, features = ["testing"] }
+
+[package.metadata.docs.rs]
+all-features = true
