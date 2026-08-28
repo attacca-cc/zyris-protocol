@@ -42,24 +42,46 @@ which is what catches a file the manifest forgot to include.
 
 ## Publish
 
-Order matters — each crate has to be on the registry before anything that names it.
-
 ```bash
-for c in zyris-proto zyris-macros zyris-core zyris-caps \
-         zyris-fs zyris-terminal zyris-transfer zyris-screen \
-         zyris-p2p zyris-attacca zyris; do
-  cargo publish -p "$c"
-done
+cargo publish --workspace --exclude zyris-input --exclude zyris-capkit
 ```
 
-The registry index takes a moment to catch up between crates; if the next one fails to resolve the
-one before it, wait and retry rather than reaching for `--no-verify`.
+Cargo works out the order and waits for the index between crates. **Prefer this over publishing one
+crate at a time**, for the reason the next paragraph is about.
 
-**Publishing only the protocol crates is a supported variation.** Stopping after `zyris-caps` and
-`zyris-p2p`/`zyris-attacca`/`zyris` leaves the four reference implementations git-only, which is the
-shape a release that wants to say "this is a protocol, not a toolkit" would take. Going the other
-way later is one publish; a name once taken cannot be given back, so the reversible order is
-protocol first.
+If you do run them one at a time, this is the order, and it is not the one the layering suggests:
+
+```text
+zyris-proto  zyris-macros  zyris-core  zyris-caps  zyris-p2p  zyris-attacca  zyris
+zyris-fs  zyris-terminal  zyris-screen  zyris-transfer
+```
+
+**`zyris-transfer` goes last because of dependencies a default build does not have.** It names
+`zyris-attacca` and `zyris-p2p` as *optional*, and cargo resolves an optional dependency against the
+registry whether or not a feature turned it on. An earlier version of this file put `zyris-transfer`
+seventh and `zyris-p2p` ninth; that run dies at crate seven with six names already permanent.
+Measured with a throwaway crate carrying one optional dependency on a name that does not exist:
+
+```text
+error: failed to prepare local package for uploading
+Caused by:
+  no matching package named `…` found
+```
+
+So the rule is: anything naming an intra-workspace crate goes after it, `optional = true` included.
+
+## Only the protocol crates?
+
+**Not supportable as written, and the reason is in the manifests.** Every intra-workspace dependency
+here is the `version` + `path` form — `zyris-fs/Cargo.toml` says
+`zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core" }`. Cargo strips `path`
+when the crate comes from the registry and keeps it when the crate comes from git. So a consumer who
+takes `zyris` from crates.io and `zyris-terminal` from git gets `zyris-core` and `zyris-caps` twice,
+from two different sources, and the error names the same type on both sides of a trait bound it
+plainly satisfies.
+
+A release of `zyris` that cannot be combined with any implementation is not the smaller half of this
+release. It is a different, worse one.
 
 ## What a consumer gets
 
