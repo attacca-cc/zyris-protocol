@@ -68,6 +68,15 @@ pub enum ConnectError {
     /// The network or the server, briefly. Retrying is the answer.
     #[error("could not reach the server: {0}")]
     Unreachable(#[from] TransportError),
+    /// Rustls picks its provider from crate features, and this build turned none of them on, so
+    /// there is nothing to negotiate `wss://` with. Left to rustls this is a panic on the first
+    /// connection rather than an error, which is why it is caught here and named.
+    #[error(
+        "this build selected no TLS provider, so it cannot dial wss://: turn on the `tls-ring` \
+         or `tls-aws-lc` feature of this crate, or install one yourself before dialling with \
+         `rustls::crypto::CryptoProvider::install_default`"
+    )]
+    NoTlsProvider,
 }
 
 impl From<WireError> for ConnectError {

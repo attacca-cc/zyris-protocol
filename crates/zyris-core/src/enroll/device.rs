@@ -141,6 +141,10 @@ impl Round {
 /// # fn save(_credential: &zyris::AccountCredential) -> std::io::Result<()> { Ok(()) }
 /// ```
 pub async fn enroll(server_url: &str, request: EnrollRequest) -> Result<Enrollment, EnrollError> {
+    // Before the builder, not after: on the `rustls-no-provider` feature reqwest
+    // *panics* inside `build()` when no provider is installed — not on a request, not
+    // on an https URL, but on construction. `enroll` therefore implies `tls-ring`.
+    crate::tls::install_chosen_provider();
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent(concat!("zyris/", env!("CARGO_PKG_VERSION")))

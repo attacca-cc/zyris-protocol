@@ -5,7 +5,7 @@
 //! capabilities the server announces back. This crate is the whole stack behind one dependency:
 //!
 //! ```toml
-//! zyris = { version = "0.2", features = ["full"] }
+//! zyris = { version = "0.2", features = ["full", "tls-ring"] }
 //! ```
 //!
 //! ```no_run
@@ -21,6 +21,34 @@
 //! # }
 //! ```
 //!
+//! # Dialling needs a TLS provider, and it is yours to name
+//!
+//! `wss://` is TLS, rustls does TLS, and rustls has no cipher suite of its own: it reads its
+//! crate features and, when they name no provider, it panics on the first connection. That
+//! panic is deferred all the way to runtime — there is no `compile_error!` for it — so a build
+//! with none is green, starts, announces, and dies the moment it dials.
+//!
+//! So neither provider is on by default and this crate answers the question itself. Turn on
+//! exactly one:
+//!
+//! | Feature | Provider | What it costs to build |
+//! |---|---|---|
+//! | `tls-ring` | `ring` | a working `cc` |
+//! | `tls-aws-lc` | `aws-lc-rs` | a working `cc`, and `cmake` off its nine named targets |
+//!
+//! Both compile C, which is why neither is default: `cargo add zyris` stays buildable on a
+//! machine with no toolchain, and everything short of reaching the network works there —
+//! declaring capabilities, serving them over another transport, the wire types. A build that
+//! skipped this step and dials anyway is refused by [`ConnectError::NoTlsProvider`], before a
+//! socket is opened, naming both features. An application that installs its own provider with
+//! `rustls::crypto::CryptoProvider::install_default` is believed and needs neither.
+//!
+//! **`enroll` names `tls-ring` for you**, because there is no such thing as enrolling without TLS:
+//! it is an HTTPS device-grant flow, and `reqwest` panics while *building its client* rather than
+//! on a request when no provider is installed. Adding `tls-aws-lc` alongside overrides the choice.
+//! `p2p` reaches a provider too, through iroh — that one is a property of wanting QUIC rather than
+//! something this crate decided.
+//!
 //! That is the half a node does on every start. The other half — enrolling once, keeping the
 //! account credential, and minting a node token from it — is spelled out end to end on
 //! `zyris::enroll`, behind the `enroll` feature (so it is not a link here: under default
@@ -29,8 +57,10 @@
 //! here makes it.
 //!
 //! Implementations of those declarations are not here on purpose: what a node offers is the
-//! node's decision. The repository carries reference ones, deliberately unpublished — see
-//! <https://github.com/attacca-cc/zyris-protocol>.
+//! node's decision. Reference ones are separate crates, added beside this one as you want them —
+//! `zyris-fs`, `zyris-terminal`, `zyris-transfer`, `zyris-screen`. `zyris-input` is the exception
+//! and stays git-only: it pins a fork of `enigo`, and crates.io refuses a manifest naming a git
+//! source. See <https://github.com/attacca-cc/zyris-protocol>.
 //!
 //! # What is where
 //!

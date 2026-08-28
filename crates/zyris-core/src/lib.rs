@@ -2,6 +2,9 @@
 pub mod account;
 mod capabilities;
 mod connection;
+#[cfg(any(feature = "client", feature = "enroll"))]
+mod tls;
+
 pub mod enroll;
 mod error;
 mod handle;

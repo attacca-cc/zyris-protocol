@@ -10,7 +10,7 @@ either peer may call the other, open streams, or change what it offers mid-sessi
 
 ```toml
 [dependencies]
-zyris = { version = "0.2", features = ["full"] }
+zyris = { version = "0.2", features = ["full", "tls-ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -56,7 +56,17 @@ links nothing twice — the module here **is** that crate.
 what depending on the runtime alone does.
 
 - **Runtime:** `client`, `enroll`, `hostname`, `axum`, `testing`
+- **TLS:** `tls-ring` or `tls-aws-lc` — exactly one, and **without one this crate refuses to dial
+  `wss://`**. `enroll` names `tls-ring` for you; `p2p` reaches one through iroh.
 - **Stack:** `caps`, `p2p`, and `full` for both plus `enroll`
+
+Neither TLS feature is on by default because both compile C: `ring` wants a working `cc`, and
+`aws-lc-rs` wants `cmake` as well off its nine named targets. That keeps `cargo add zyris`
+buildable on a machine with no toolchain — everything short of dialling works there. Rustls picks
+its provider from crate features and *panics* when they name none, deferred to the first
+connection with nothing at compile time to warn you; a build that skipped this gets
+`ConnectError::NoTlsProvider` before a socket is opened instead. An application that calls
+`rustls::crypto::CryptoProvider::install_default` itself is believed and needs neither feature.
 
 **Implementations are not here.** The repository's `zyris-capkit` has reference ones and is not
 published: a node decides what it offers, and a crate that pins a git fork of `enigo` could not go

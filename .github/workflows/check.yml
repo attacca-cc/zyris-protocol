@@ -22,6 +22,17 @@ jobs:
           shared-key: workspace
           cache-on-failure: true
 
+      # `zyris-screen` and `zyris-input` are workspace members now, so `--workspace` compiles the
+      # display stack here for the first time. `xcap` reaches X11 and the portal, `libwayshot`
+      # reaches Wayland, and `enigo` links `xkbcommon` with a bare `#[link]` and no pkg-config
+      # probe of its own. Before the split these crates were a capkit feature nothing turned on,
+      # which is a polite way of saying nothing had ever compiled them.
+      - name: display development packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libclang-dev libxcb1-dev libxrandr-dev \
+            libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev libxkbcommon-dev
+
       - name: cargo build
         run: cargo build --workspace
 
@@ -29,20 +40,38 @@ jobs:
       # checked-in .stderr files — they are the reason a toolchain bump can fail this job on its own.
       #
       # **The feature flags are load-bearing, not a nicety.** `--workspace` builds every member with
-      # its *default* features, and no member turns `zyris-capkit/transfer` on — so a plain
+      # its *default* features, and nothing turns `zyris-transfer`'s `send`/`listen` on — so a plain
       # `cargo test --workspace` compiles all five of the file-transfer test files down to nothing
       # and reports `0 tests` for each. That was the state of this job until 2026-08-11: green over a
       # path jail, an undo trail and a TOFU pin that nothing had ever executed. Naming the features
       # here is what makes those tests real.
       #
-      # Every feature that gates tests has to be named. Still knowingly absent: `screen`, whose
-      # 6 tests need `xcap`/`libwayshot` and a session to capture — so they are not silently
-      # missing, they are deliberately not run here.
+      # They read `zyris-transfer/...` rather than `zyris-capkit/...` since the split. A `--features`
+      # flag naming a crate that is not in the workspace is an error, so that rename cannot rot
+      # silently — but a *test target* that no longer exists is skipped, not failed, which is why
+      # the Windows job below moved in the same commit.
+      #
+      # Every feature that gates tests has to be named. `zyris-screen`'s six tests are the one
+      # exception and they are now compiled and run here: each asks `ScreenBackend::detect()` for a
+      # display first and returns early when there is none, so on a headless runner they pass by
+      # doing nothing. That is weaker than it sounds and is on purpose — compiling them is what
+      # catches a backend that stopped building, which is the failure this job can actually see.
       - name: cargo test
         # `zyris/enroll` is here so the `facade_probe` example is compiled: it declares
         # `required-features = ["enroll"]`, and a target whose features are not enabled is
         # skipped silently rather than failing — which would make it a guard that guards nothing.
-        run: cargo test --workspace --features zyris-capkit/transfer-send,zyris-capkit/transfer-listen,zyris/enroll
+        run: cargo test --workspace --features zyris-transfer/send,zyris-transfer/listen,zyris/enroll
+
+      # Each transfer feature alone. `--workspace` above unions them, which is exactly the shape
+      # that hid `listen` not compiling without `send`: `transfer/listen.rs` reached
+      # `super::send::Rendezvous`, so the manifest's claim that the two are independent was false
+      # and no build in this repository ever tested it. One line per feature, so the failure names
+      # which one.
+      - name: cargo build (each transfer feature alone)
+        run: |
+          cargo build -p zyris-transfer
+          cargo build -p zyris-transfer --features send
+          cargo build -p zyris-transfer --features listen
 
   # Windows is a platform this repo makes claims about and has never run. `Terminal::exec`'s doc
   # tells an agent how to run a PowerShell script without fighting quoting — that sentence *is* the
@@ -69,4 +98,4 @@ jobs:
         run: cargo build --workspace
 
       - name: cargo test (windows-specific)
-        run: cargo test -p zyris-capkit --test terminal_windows
+        run: cargo test -p zyris-terminal --test terminal_windows

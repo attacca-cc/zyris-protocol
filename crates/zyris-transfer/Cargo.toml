@@ -1,0 +1,100 @@
+[package]
+name = "zyris-transfer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The reference file-transfer implementation for Zyris: inbox, resume, and peers"
+readme = "README.md"
+keywords = ["zyris", "file-transfer", "p2p", "inbox", "capability"]
+categories = ["network-programming", "filesystem", "api-bindings"]
+
+# Everything here is the receiving side of the *filesystem* — the name wash, the inbox jail, the
+# undo stash, the audit log, and the `peer_transfer` exchange that ties them together. It touches
+# nothing but the disk, so it pulls in no transport, and it alone is enough to drive a whole
+# transfer over `zyris::testing::duplex`. The two halves that touch the *network* are features.
+#
+# `async_trait` is listed, unlike in `zyris-caps`: this crate writes `#[async_trait::async_trait]`
+# by hand on `impl PeerTransfer` and on its own traits, rather than only reaching it through the
+# `#[zyris::capability]` macro's `::zyris::` path.
+[dependencies]
+async-trait.workspace = true
+# `pull` hands each chunk of the file back as one `Bytes`.
+bytes.workspace = true
+# `stream::unfold` builds the chunked body of `pull`; `StreamExt` drains it on the receiving side.
+futures-util.workspace = true
+# `transfer_id` and the `.part` marker are hex, and so is every sha256 that crosses the wire.
+hex = "0.4"
+# `AuditLine` is written as one JSON object per line.
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+# Held at 0.10 rather than the workspace's 0.11: the digest here has to keep producing byte-for-byte
+# the same `transfer_id` and the same `sha256` string an already-deployed peer will check against,
+# and a resume that stopped matching would restart silently rather than fail.
+sha2 = "0.10"
+# `fs` for every path this touches, `io-util` for the `AsyncRead`/`AsyncWrite`/`AsyncSeek` that
+# hashing, resuming and appending a `.part` need, `sync` for the mutex holding what a sender has
+# reserved. No runtime feature at this level: `listen` is the only part that spawns, and it asks
+# for `rt` itself.
+tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
+tracing.workspace = true
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false }
+zyris-caps = { version = "0.2.0", path = "../zyris-caps" }
+# Both halves of the network ask the rendezvous where a peer is, or whose a peer is.
+zyris-attacca = { version = "0.2.0", path = "../zyris-attacca", optional = true }
+# The transport. `iroh` is never named directly in this crate's own source — `zyris-p2p` re-exports
+# the one it resolved, so there is no way for a second copy to end up linked in.
+zyris-p2p = { version = "0.2.0", path = "../zyris-p2p", optional = true }
+
+# `O_NOFOLLOW` when opening the `.part` file, which is the only line of this crate that names libc.
+# Windows has no equivalent that fails rather than opening the link itself, so there the pre-check
+# is the whole defense — and declaring this unconditionally would make every Windows build carry a
+# crate nothing there compiles.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# **Both are off by default, and each stands on its own.** The two directions are separately useful:
+# a node can take deliveries without carrying the tool surface that makes them, and a node can make
+# them without listening for any.
+#
+# That claim used to be false. `listen.rs` reached `super::send::Rendezvous`, so `--features listen`
+# alone did not compile, and nothing in this repository built either feature by itself to notice.
+# The shared handle now lives in `rendezvous.rs`, compiled for either.
+#
+# **Turning either one on is not free, and the cost is not local to this crate.** They reach
+# `zyris-p2p`, which reaches iroh, whose default `tls-ring` pulls in `ring` — a hard `cc` build that
+# wants a C toolchain (and, cross-compiling, one for the target). Cargo features are additive across
+# a workspace and across the dependency graph: switching this on for one member switches it on for
+# every build of this crate in that graph, so a workspace where one binary sends files makes every
+# other member's build pay for the C toolchain too.
+[features]
+default = []
+# The sending side: `file_transfer.send_to`. `time` is for the wire deadline that turns a call
+# outliving its budget into a `pending` receipt rather than a timeout error.
+send = ["dep:zyris-attacca", "dep:zyris-p2p", "tokio/time"]
+# The receiving side of the *network*, as opposed to the baseline's receiving side of the
+# filesystem: accepting peer connections needs the rendezvous (to know whose nodes they are) and
+# iroh (to accept at all). `rt` is for the `tokio::spawn` per accepted connection — the accept loop
+# never waits on a peer.
+listen = ["dep:zyris-attacca", "dep:zyris-p2p", "tokio/rt"]
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+# `zyris::testing::duplex` — two real Connections over a channel. Every test here drives the whole
+# exchange through it, so none of them needs a socket. It is a non-default feature, and without this
+# line the transfer tests do not compile at all.
+zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false, features = ["testing"] }
+# The tests have to produce the same digest the receiving side will check, so they need the same two
+# crates the implementation does. Already above as dependencies; repeated because a test target
+# resolves its own graph and an optional dependency that a feature has not turned on is not there.
+sha2 = "0.10"
+hex = "0.4"
+# `iroh::test_utils::run_relay_server`, for the one test that has to have a relay in the path. A
+# dev-dependency, so nothing a node ships carries it. Named here rather than reached through
+# `zyris_p2p::iroh` because `test-utils` is a feature of iroh itself, and a re-export cannot turn on
+# a feature of the crate it re-exports.
+iroh = { version = "1", features = ["test-utils"] }
+
+[package.metadata.docs.rs]
+all-features = true

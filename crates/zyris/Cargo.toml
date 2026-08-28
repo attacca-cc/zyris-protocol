@@ -29,6 +29,14 @@ client = ["zyris-core/client"]
 enroll = ["zyris-core/enroll"]
 hostname = ["zyris-core/hostname"]
 testing = ["zyris-core/testing"]
+# The TLS provider, which nothing else can choose for you. Rustls reads its crate features and, if
+# none of them names a provider, panics on the first `wss://` — so this crate refuses that dial by
+# name instead (`ConnectError::NoTlsProvider`). Off by default because both providers compile C and
+# `cargo add zyris` has to keep building on a machine with no toolchain; the price of dialling is
+# one of these two, and `tls-ring` is the cheaper (a `cc` build, where `tls-aws-lc` also wants
+# `cmake` off its nine named targets).
+tls-ring = ["zyris-core/tls-ring"]
+tls-aws-lc = ["zyris-core/tls-aws-lc"]
 
 # --- The stack. Each one adds a module at the root of this crate. ---
 # Declarations only — no tokio, no OS libraries.
@@ -37,9 +45,10 @@ caps = ["dep:zyris-caps"]
 p2p = ["dep:zyris-p2p"]
 
 # Every layer this crate has a module for, plus enrollment. **The reference implementations are not
-# one of them**: they are unpublished on purpose, so a node that wants `PtyTerminal` or
-# `LocalFileIo` names that crate directly out of the repository — see ridanit-ruma/zyris-hello,
-# which does.
+# one of them and never will be**: what a node offers is the node's decision, so a node that wants
+# `PtyTerminal` or `LocalFileIo` adds `zyris-terminal` or `zyris-fs` beside this crate, the way
+# `ratatui-crossterm` is added beside `ratatui`. `full` also names no TLS provider — that is a
+# choice with a build cost and this feature does not get to make it for you.
 full = ["caps", "enroll", "p2p"]
 
 [dev-dependencies]

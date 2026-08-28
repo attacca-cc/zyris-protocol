@@ -20,6 +20,12 @@ Nothing here is on crates.io yet, so take it by git:
 zyris = { git = "https://github.com/attacca-cc/zyris-protocol", features = ["caps", "enroll"] }
 ```
 
+**Implementations are separate crates, added one at a time.** The catalogue says what a `terminal`
+or a `file_io` *is*; what a node offers is the node's own decision, so nothing above pulls an
+implementation in. Add the ones you want — `zyris-fs`, `zyris-terminal`, `zyris-transfer`,
+`zyris-screen` — the way `ratatui-crossterm` is added beside `ratatui`. Only `zyris-input` is
+git-only, and only because of the `enigo` fork it pins.
+
 `default` is a node that can dial and name itself, and costs what `zyris-core` alone costs. `caps`
 adds the standard capability declarations; `enroll` adds the 8-character-code flow and the account
 layer below. Neither is on by default, because a node holding a `znt_` token out of a secret
@@ -60,7 +66,11 @@ The whole of that — capability, token, connection — is one runnable file:
 | [`zyris-proto`](crates/zyris-proto) | `zyris::proto` | Wire types only: envelopes, frames, the handshake, datums and blobs. No I/O, no async. |
 | [`zyris-macros`](crates/zyris-macros) | `zyris::capability` | The `#[zyris::capability]` proc-macro. Not a direct dependency. |
 | [`zyris-caps`](crates/zyris-caps) | `zyris::caps` | The standard capability catalogue — `terminal`, `file_io`, `input`, `screen_capture`, `browser_chrome`, `file_transfer`. Declarations only: no tokio, no OS dependencies, cheap for a client to depend on. |
-| [`zyris-capkit`](crates/zyris-capkit) | — | Reference implementations of that catalogue: `LocalFileIo` and `PtyTerminal` by default, plus `HostScreenCapture` and `EnigoInput` behind the `screen` and `input` features. **Not published to crates.io**: what a node offers is the node's decision, and this crate pins a git fork of `enigo`, which a published crate may not do. Depend on it by git and name it directly. |
+| [`zyris-fs`](crates/zyris-fs) | — | `LocalFileIo`, the reference `file_io` over `tokio::fs`. Pure Rust. |
+| [`zyris-terminal`](crates/zyris-terminal) | — | `PtyTerminal`, the reference `terminal` over `portable-pty`. Pure Rust. |
+| [`zyris-transfer`](crates/zyris-transfer) | — | The reference `file_transfer` and `peer_transfer`: inbox, resume, undo, and the peer exchange behind `send`/`listen`. |
+| [`zyris-screen`](crates/zyris-screen) | — | `HostScreenCapture`, over `xcap` or `zwlr_screencopy`. Pure Rust off Linux; on Linux it needs the display development packages. |
+| [`zyris-input`](crates/zyris-input) | — | `EnigoInput`, keyboard and pointer. **The one crate here that cannot be published**: it pins a git fork of `enigo`, and crates.io refuses a manifest that names a git source. |
 | [`zyris-attacca`](crates/zyris-attacca) | — | The `attacca_api` capability: the one surface that runs the other way, announced by the server rather than by a node. Named directly rather than reached through `zyris`: Attacca is one deployment, and the protocol's face does not carry it. |
 | [`zyris-p2p`](crates/zyris-p2p) | `zyris::p2p` | Transport that carries Zyris over a direct node-to-node connection. |
 

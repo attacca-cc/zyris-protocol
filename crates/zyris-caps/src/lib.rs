@@ -6,7 +6,21 @@
 //! nothing else.
 //!
 //! There is deliberately no implementation here, and no dependency that touches an operating
-//! system. The reference implementations live in `zyris-capkit`.
+//! system. The reference implementations are separate crates — `zyris-fs`, `zyris-terminal`,
+//! `zyris-transfer`, `zyris-screen`, `zyris-input` — and a node adds whichever it wants.
+//!
+//! A few items here are not declarations but *contract*: `resolve_under`, `Displays`,
+//! `no_such_display`, `display_scale`. They are what two independent implementations of one
+//! declaration have to agree on, and they live here for the same reason the declarations do —
+//! duplicated per implementation they would drift, and the drift would be in what a request
+//! means rather than in how it is served. All four are std-only or `WireError`, so a client
+//! that never implements anything still pays nothing for them.
+
+/// Resolving a caller-supplied path against a node's root, which every capability that takes a
+/// path has to do the same way. Two implementations that disagreed about what `../` means would
+/// disagree about what a request *said*, which is the contract, not the behaviour.
+pub mod path;
+pub use path::resolve_under;
 
 pub mod browser;
 pub mod file_io;
@@ -30,8 +44,8 @@ pub use peer_transfer::{
     TransferDone, TransferOffer,
 };
 pub use screen::{
-    screen_capture_capability, Display, ImageFormat, Region, ScreenCapture, ScreenCaptureClient,
-    ScreenCaptureServer,
+    display_scale, no_such_display, screen_capture_capability, Display, Displays, ImageFormat,
+    Region, ScreenCapture, ScreenCaptureClient, ScreenCaptureServer,
 };
 pub use terminal::{
     terminal_capability, ExecOutput, PtyChunk, PtyId, PtyOpened, PtyRead, PtyScreen, Settle,

@@ -16,106 +16,29 @@ categories = ["network-programming", "os", "api-bindings"]
 publish = false
 
 [dependencies]
-async-trait = { workspace = true, optional = true }
-bytes = { workspace = true, optional = true }
-hex = { version = "0.4", optional = true }
-serde = { workspace = true, features = ["derive"], optional = true }
-serde_json = { workspace = true, optional = true }
-sha2 = { version = "0.10", optional = true }
-# Our enigo fork. It carries two things upstream does not: `Enigo::move_mouse_on_output`, because
-# absolute motion under `wlr-virtual-pointer` is output-relative and upstream's whole-desktop
-# `move_mouse` can only ever land on the output its pointer was created against (see
-# `EnigoInput::move_to`); and Shift for level-1 keysyms on libei, without which `!` arrives as `1`
-# under GNOME.
-#
-# **Fixes belong in that repository, not in a `[patch]` here or downstream.** A local path patch
-# builds on exactly one machine, and the Shift fix sat uncommitted in one for a while.
-#
-# Pinned by rev for the same reason the three zyris consumers pin zyris: a floating default branch
-# means the desktop feature can change under a build nobody touched.
-enigo = { version = "0.6.1", git = "https://github.com/ridanit-ruma/enigo-zyris", rev = "98edfe35f3400f5e4c92df58840da2e7dfc9d879", default-features = false, features = ["x11rb"], optional = true }
-futures-util = { workspace = true, optional = true }
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"], optional = true }
-# process-group kill (`kill(-pgid, SIGKILL)`) for `exec` timeouts on Unix.
-libc = { version = "0.2", optional = true }
-portable-pty = { version = "0.9.0", optional = true }
-tokio = { workspace = true, features = ["fs", "io-util", "process", "time", "sync", "rt"], optional = true }
-# The screen model. `vte` is a parser with no screen behind it, and `termwiz` / `alacritty_terminal`
-# are far more than this needs.
-vt100 = { version = "0.16.2", optional = true }
-tracing.workspace = true
-xcap = { version = "0.9.7", optional = true }
-zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false }
-zyris-attacca = { version = "0.2.0", path = "../zyris-attacca", optional = true }
+# Always: `path`/`resolve_under`/`Displays` are re-exported from here unconditionally, and this is
+# the only dependency that is not one of the crates this facade stands in front of.
 zyris-caps = { version = "0.2.0", path = "../zyris-caps" }
-# The sending side dials peers and pins their keys. `iroh` is never named directly — `zyris-p2p`
-# re-exports the one it resolved, so there is no way for a second copy to end up linked in.
-zyris-p2p = { version = "0.2.0", path = "../zyris-p2p", optional = true }
 
-# `xcap` enumerates monitors over XRandR even in a Wayland session, then captures in Wayland's
-# coordinate space; the two disagree whenever Xwayland cannot express the compositor's layout. The
-# Wayland backend goes straight to `wl_output`. This is the fork `xcap` itself depends on, so it
-# costs no extra copy of the Wayland stack.
-[target.'cfg(target_os = "linux")'.dependencies]
-libwayshot = { package = "libwayshot-xcap", version = "0.3.3", optional = true }
+zyris-fs = { version = "0.2.0", path = "../zyris-fs", optional = true }
+zyris-input = { version = "0.2.0", path = "../zyris-input", optional = true }
+zyris-screen = { version = "0.2.0", path = "../zyris-screen", optional = true }
+zyris-terminal = { version = "0.2.0", path = "../zyris-terminal", optional = true }
+zyris-transfer = { version = "0.2.0", path = "../zyris-transfer", optional = true }
 
+# The old feature names, each now nothing but "pull in the crate that holds it". Kept identical so
+# a consumer moves in one commit — change the dependency line, change the import, done — rather
+# than having to get the feature spelling right in the same breath. `desktop` survives only here,
+# and only because this crate is unpublishable anyway, so it sinks nothing.
 [features]
 default = ["file-io", "terminal"]
-file-io = ["dep:tokio", "dep:bytes", "dep:futures-util"]
-terminal = ["dep:portable-pty", "dep:tokio", "dep:bytes", "dep:futures-util", "dep:vt100", "dep:libc"]
-screen = ["dep:xcap", "dep:image", "dep:tokio", "dep:libwayshot"]
-input = ["dep:enigo", "dep:tokio"]
-input-wayland = ["input", "enigo/wayland", "enigo/platform_specific"]
-# The libei (RemoteDesktop portal) backend: mutter ignores XTEST on GNOME/KDE Wayland, so this is
-# the only input path that works on those sessions. Windows and macOS builds are unaffected — the
-# reis/ashpd dependencies are declared unix-only on the enigo side.
-input-libei = ["input", "enigo/libei", "enigo/smol", "enigo/platform_specific"]
+file-io = ["dep:zyris-fs"]
+terminal = ["dep:zyris-terminal"]
+screen = ["dep:zyris-screen"]
+input = ["dep:zyris-input"]
+input-wayland = ["input", "zyris-input/wayland"]
+input-libei = ["input", "zyris-input/libei"]
 desktop = ["screen", "input"]
-# The receiving side of node-to-node file transfer. It touches nothing but the filesystem, so it
-# pulls in no graphics dependencies, and it is independent of the P2P transport (`zyris-p2p`) — this
-# feature alone is enough to drive the whole exchange over `zyris::testing::duplex`.
-transfer = [
-    "dep:tokio",
-    "dep:bytes",
-    "dep:futures-util",
-    "dep:sha2",
-    "dep:hex",
-    "dep:serde",
-    "dep:serde_json",
-    "dep:async-trait",
-    "dep:libc",
-]
-# The sending side: `file_transfer.send_to`. Split out from `transfer` rather than folded into it
-# because this is where the dependency weight is — the rendezvous client and the whole iroh QUIC
-# stack — and a node that only ever *receives* should not have to build any of it.
-transfer-send = ["transfer", "dep:zyris-attacca", "dep:zyris-p2p"]
-# The receiving side of the *network*, as opposed to `transfer`'s receiving side of the
-# filesystem: accepting peer connections needs the rendezvous (to know whose nodes they are) and
-# iroh (to accept at all). Separate from `transfer-send` so a node can take deliveries without
-# carrying the surface that makes them.
-transfer-listen = ["transfer", "dep:zyris-attacca", "dep:zyris-p2p"]
-
-[dev-dependencies]
-bytes.workspace = true
-futures-util.workspace = true
-tempfile.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-# `zyris::testing::duplex` — two real Connections over a channel. Every transfer test drives the
-# whole exchange through it, so none of them needs a socket. It is a non-default feature, and
-# without this line the transfer tests do not compile at all.
-zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false, features = ["testing"] }
-# The transfer tests have to produce the same digest the receiving side will check, so they need
-# the same two crates the implementation uses. Already in the tree as optional deps of `transfer`;
-# a dependency of the crate is not visible to its integration tests, hence the repeat.
-sha2 = "0.10"
-hex = "0.4"
-# `iroh::test_utils::run_relay_server`, for the one test that has to have a relay in the path.
-# A dev-dependency, so nothing a node ships carries it. Named here rather than reached through
-# `zyris_p2p::iroh` because `test-utils` is a feature of iroh itself, and a re-export cannot turn
-# on a feature of the crate it re-exports.
-iroh = { version = "1", features = ["test-utils"] }
-
-[package.metadata.docs.rs]
-# `screen` and `input` link the display stack; docs.rs has no session to capture and no X11 or
-# Wayland development packages. Everything else is documented.
-features = ["file-io", "terminal", "transfer", "transfer-send", "transfer-listen"]
+transfer = ["dep:zyris-transfer"]
+transfer-send = ["transfer", "zyris-transfer/send"]
+transfer-listen = ["transfer", "zyris-transfer/listen"]

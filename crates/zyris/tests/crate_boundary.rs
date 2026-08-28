@@ -1,10 +1,14 @@
 //! What the published face names is a promise, so the boundary is worth a test.
 //!
-//! `zyris-capkit` is not a library consumer's dependency: it is a set of reference implementations,
-//! which is the program's business, and it carries a git fork of `enigo` that could not go to
-//! crates.io even if it were. Leaving it out of the face is what makes the fork a non-issue — and
-//! leaving it out is a one-line edit away from being undone by anyone adding "just one more
-//! re-export".
+//! Two promises, and they are different. **The face stays thin**: an implementation is the node's
+//! business, so depending on `zyris` never drags one in — a one-line edit away from being undone by
+//! anyone adding "just one more re-export". And **what says it publishes can**: crates.io refuses
+//! any manifest whose graph names a git source, so a git dependency added three crates down turns a
+//! publishable crate unpublishable with nothing at compile time to say so. Before the split that
+//! was a name check against one crate; now it is a property of every member, checked by walking.
+//!
+//! `zyris-input` is the single expected exception and is named as one. It pins a fork of `enigo`
+//! carrying two patches upstream does not have, and until those land it cannot go to the registry.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -35,6 +39,15 @@ fn file(relative: &str) -> String {
 /// `--features` flag switches on. Dev edges are dropped at every hop — a consumer never builds
 /// them, so `[dev-dependencies]` is not part of what depending on this crate pulls in.
 fn crates_a_consumer_of_this_one_links() -> BTreeSet<String> {
+    linked_from(env!("CARGO_PKG_NAME")).into_keys().collect()
+}
+
+/// Every crate reachable from `root`, mapped to where Cargo would fetch it from.
+///
+/// The source string is what decides publishability: `null` for a workspace member, `registry+…`
+/// for crates.io, `git+…` for a checkout. A crate whose graph contains the last of those cannot be
+/// published, however deep down it sits and whatever it is called.
+fn linked_from(root_name: &str) -> HashMap<String, String> {
     let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
     let output = Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--all-features", "--manifest-path", manifest])
@@ -52,10 +65,14 @@ fn crates_a_consumer_of_this_one_links() -> BTreeSet<String> {
     // Package ids are opaque and their spelling has changed between Cargo releases, so they are
     // only ever compared to each other; names come from the package table.
     let mut name_of: HashMap<&str, &str> = HashMap::new();
+    let mut source_of: HashMap<&str, &str> = HashMap::new();
     for package in metadata["packages"].as_array().expect("metadata lists packages") {
         let (id, name) = (package["id"].as_str(), package["name"].as_str());
         if let (Some(id), Some(name)) = (id, name) {
             name_of.insert(id, name);
+            // A workspace member has no source at all, which is neither a registry nor a git
+            // checkout and is exactly what "this repository" looks like from here.
+            source_of.insert(id, package["source"].as_str().unwrap_or("workspace"));
         }
     }
 
@@ -83,14 +100,15 @@ fn crates_a_consumer_of_this_one_links() -> BTreeSet<String> {
     let root = nodes
         .iter()
         .filter_map(|node| node["id"].as_str())
-        .find(|id| name_of.get(id) == Some(&env!("CARGO_PKG_NAME")))
-        .expect("the crate under test is in its own workspace's resolve");
+        .find(|id| name_of.get(id) == Some(&root_name))
+        .unwrap_or_else(|| panic!("{root_name} is not in this workspace's resolve"));
 
-    let mut seen = BTreeSet::new();
+    let mut seen: HashMap<String, String> = HashMap::new();
     let mut stack = vec![root];
     while let Some(id) = stack.pop() {
         let name = name_of.get(id).copied().unwrap_or(id);
-        if !seen.insert(name.to_string()) {
+        let source = source_of.get(id).copied().unwrap_or("workspace");
+        if seen.insert(name.to_string(), source.to_string()).is_some() {
             continue;
         }
         stack.extend(edges.get(id).into_iter().flatten().copied());
@@ -98,13 +116,114 @@ fn crates_a_consumer_of_this_one_links() -> BTreeSet<String> {
     seen
 }
 
+/// Every workspace member, and whether its manifest says it may be published.
+///
+/// Read from the manifests rather than from `cargo metadata`'s `publish` field, because that field
+/// is `null` both for "publish anywhere" and for versions of Cargo that did not report it, and the
+/// difference matters here.
+fn members() -> Vec<(String, bool)> {
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("crates/ is the parent");
+    let mut found = Vec::new();
+    for entry in fs::read_dir(crates).expect("crates/ is readable") {
+        let dir = entry.expect("a readable directory entry").path();
+        let manifest = dir.join("Cargo.toml");
+        if !manifest.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&manifest).expect("a member manifest is readable");
+        let name = dir.file_name().expect("a named directory").to_string_lossy().into_owned();
+        found.push((name, !text.contains("publish = false")));
+    }
+    found.sort();
+    assert!(found.len() >= 5, "found only {} members, so this test read almost nothing", found.len());
+
+    // A crate directory the root manifest does not list is not built by anything: not by
+    // `--workspace`, not by CI, not by `cargo publish`. It looks like code and behaves like a
+    // deleted file, which is the worst of the two.
+    let root = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(|c| c.parent())
+            .expect("the workspace root is two levels up").join("Cargo.toml"),
+    )
+    .expect("the workspace manifest is readable");
+    for (name, _) in &found {
+        assert!(
+            root.contains(&format!("\"crates/{name}\"")),
+            "crates/{name} exists but the workspace `members` list does not name it, so nothing \
+             ever builds it"
+        );
+    }
+    found
+}
+
+/// The face is what `cargo add zyris` gets, and it has to be publishable.
+///
+/// Strictly stronger than the name check this replaces: it also catches a git dependency added
+/// three crates down in `zyris-p2p` or `zyris-attacca`, and it needs no hand-written exclusion list
+/// to go stale the day a sixth addon appears.
 #[test]
-fn the_reference_implementations_are_not_offered_on_crates_io() {
-    let manifest = file("zyris-capkit/Cargo.toml");
+fn nothing_the_face_links_comes_from_a_git_checkout() {
+    let linked = linked_from(env!("CARGO_PKG_NAME"));
+
+    // The walk has to have walked.
     assert!(
-        manifest.contains("publish = false"),
-        "zyris-capkit would be published, and it pins a git fork of enigo that cannot be"
+        linked.contains_key("zyris-proto"),
+        "the walk reached {} crate(s) and none was the wire format, so it never left the root",
+        linked.len()
     );
+
+    let from_git: Vec<_> = linked
+        .iter()
+        .filter(|(_, source)| source.starts_with("git+"))
+        .map(|(name, source)| format!("{name} ({source})"))
+        .collect();
+    assert!(
+        from_git.is_empty(),
+        "depending on {} now reaches a git checkout, so it can never be published:\n  {}",
+        env!("CARGO_PKG_NAME"),
+        from_git.join("\n  ")
+    );
+}
+
+/// The same property, for every member that has not said `publish = false`.
+///
+/// This is the one that would have caught the split going wrong in the other direction: cutting
+/// `zyris-fs` out of `zyris-capkit` is worth doing precisely because it stops one git fork from
+/// making four pure-Rust crates unpublishable, and nothing would have said so if the fork had come
+/// along by accident.
+#[test]
+fn every_crate_that_says_it_publishes_can() {
+    for (member, publishes) in members() {
+        if !publishes {
+            // A crate that says `publish = false` is out of scope here — but the *reason* is worth
+            // holding on to. `zyris-input` opts out because it pins a fork of `enigo`, and if that
+            // fork ever lands upstream the opt-out becomes a crate withheld for no reason. So the
+            // reason is asserted rather than trusted: no git source left means it is time to
+            // publish this one too.
+            if member == "zyris-input" {
+                let reaches_git =
+                    linked_from(&member).values().any(|source| source.starts_with("git+"));
+                assert!(
+                    reaches_git,
+                    "zyris-input no longer reaches a git checkout, so the reason it carries \
+                     `publish = false` is gone — drop the opt-out and let it publish"
+                );
+            }
+            continue;
+        }
+
+        let linked = linked_from(&member);
+        let from_git: Vec<_> = linked
+            .iter()
+            .filter(|(_, source)| source.starts_with("git+"))
+            .map(|(name, source)| format!("{name} ({source})"))
+            .collect();
+        assert!(
+            from_git.is_empty(),
+            "{member} has no `publish = false` but reaches a git checkout, so `cargo publish` \
+             would refuse it:\n  {}",
+            from_git.join("\n  ")
+        );
+    }
 }
 
 #[test]
@@ -122,14 +241,18 @@ fn depending_on_the_face_never_pulls_in_the_reference_implementations() {
         linked.iter().cloned().collect::<Vec<_>>().join("\n  ")
     );
 
-    assert!(
-        !linked.contains("zyris-capkit"),
-        "depending on {} now links zyris-capkit, so the face carries an unpublishable git fork of \
-         enigo. The path may be direct or several crates down — `cargo tree -p {} --all-features \
-         -i zyris-capkit` names it.",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_NAME")
-    );
+    for implementation in
+        ["zyris-fs", "zyris-terminal", "zyris-transfer", "zyris-screen", "zyris-input"]
+    {
+        assert!(
+            !linked.contains(implementation),
+            "depending on {} now links {implementation}, so the face decides what a node offers. \
+             The path may be direct or several crates down — `cargo tree -p {} --all-features -i \
+             {implementation}` names it.",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_NAME")
+        );
+    }
 }
 
 /// Attacca is one deployment, not the protocol. This crate is what someone reaching for "the Zyris
@@ -166,7 +289,7 @@ fn the_face_does_not_name_one_deployments_hub() {
 fn the_face_does_not_advertise_a_crates_io_page_that_will_never_exist() {
     let readme = file("zyris/README.md");
     assert!(
-        !readme.contains("crates.io/crates/zyris-capkit"),
-        "the README links a crates.io page for a crate that is not published"
+        !readme.contains("crates.io/crates/zyris-input"),
+        "the README links a crates.io page for the one crate that cannot be published"
     );
 }

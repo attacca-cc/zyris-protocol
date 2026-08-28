@@ -107,6 +107,11 @@ impl Node {
     /// what a refusal means.
     #[cfg(feature = "client")]
     pub async fn dial(&self, url: &str, token: &str) -> Result<Connection, ConnectError> {
+        // Before the socket, because this is a fact about the build and the network has no say in
+        // it. Left to rustls it is a panic on the line that builds the client config.
+        if crate::tls::missing_for(url) {
+            return Err(ConnectError::NoTlsProvider);
+        }
         let transport = crate::transport::ws::connect(url, token).await?;
         Ok(self.connect_over(transport).await?)
     }
@@ -261,6 +266,7 @@ enum Ending {
     Unauthorized,
     Version { ours: String, theirs: Option<String> },
     Unreachable(TransportError),
+    NoTlsProvider,
 }
 
 #[cfg(feature = "client")]
@@ -273,6 +279,7 @@ impl Ending {
             ConnectError::Unauthorized => Ending::Unauthorized,
             ConnectError::VersionMismatch { ours, theirs } => Ending::Version { ours, theirs },
             ConnectError::Unreachable(inner) => Ending::Unreachable(inner),
+            ConnectError::NoTlsProvider => Ending::NoTlsProvider,
         }
     }
 
@@ -283,6 +290,7 @@ impl Ending {
             Ending::Unauthorized => Err(ConnectError::Unauthorized),
             Ending::Version { ours, theirs } => Err(ConnectError::VersionMismatch { ours, theirs }),
             Ending::Unreachable(inner) => Err(ConnectError::Unreachable(inner)),
+            Ending::NoTlsProvider => Err(ConnectError::NoTlsProvider),
         }
     }
 }
@@ -293,7 +301,8 @@ fn is_fatal(error: &ConnectError) -> bool {
     match error {
         ConnectError::Revoked
         | ConnectError::Unauthorized
-        | ConnectError::VersionMismatch { .. } => true,
+        | ConnectError::VersionMismatch { .. }
+        | ConnectError::NoTlsProvider => true,
         ConnectError::Unreachable(_) => false,
     }
 }

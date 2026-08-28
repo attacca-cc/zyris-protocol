@@ -128,5 +128,8 @@ fn say_connect(error: ConnectError) -> String {
         }
         // …and the one it must not be confused with: retrying is the whole answer.
         ConnectError::Unreachable(transport) => format!("worth retrying: {transport}"),
+        // A build fault, not a network one: no `tls-ring` or `tls-aws-lc`, so rustls has
+        // nothing to negotiate `wss://` with. Retrying reaches the same wall every time.
+        ConnectError::NoTlsProvider => "this build named no TLS provider".to_string(),
     }
 }
