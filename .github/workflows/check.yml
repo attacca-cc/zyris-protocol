@@ -27,11 +27,18 @@ jobs:
       # reaches Wayland, and `enigo` links `xkbcommon` with a bare `#[link]` and no pkg-config
       # probe of its own. Before the split these crates were a capkit feature nothing turned on,
       # which is a polite way of saying nothing had ever compiled them.
+      #
+      # **`cargo build` does not prove this list is complete.** A library target stops at an rlib,
+      # which records the `-l` flags rather than resolving them; only an executable calls the
+      # linker. So the build step below went green with `libgbm-dev` missing and the test step
+      # failed on `unable to find library -lgbm` — from `libwayshot`, three crates down. Add a
+      # package here when a *test* fails to link, and do not read a green build as agreement.
       - name: display development packages
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libclang-dev libxcb1-dev libxrandr-dev \
-            libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev libxkbcommon-dev
+            libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev libgbm-dev \
+            libxkbcommon-dev
 
       - name: cargo build
         run: cargo build --workspace
