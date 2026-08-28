@@ -8,8 +8,12 @@ The standard capability catalogue for the
 crate is the trait, the descriptor and the generated client for each capability, so a peer that only
 *calls* these tools is cheap to build.
 
-For implementations of the same catalogue, see
-[`zyris-capkit`](https://crates.io/crates/zyris-capkit).
+Implementations are separate crates, one per capability, and a node adds the ones it serves:
+[`zyris-fs`](https://crates.io/crates/zyris-fs),
+[`zyris-terminal`](https://crates.io/crates/zyris-terminal),
+[`zyris-screen`](https://crates.io/crates/zyris-screen) and
+[`zyris-transfer`](https://crates.io/crates/zyris-transfer). `zyris-input` is the exception and is
+git-only, because it pins a fork of `enigo`.
 
 Re-exported as `zyris::caps` when [`zyris`](https://crates.io/crates/zyris) is built with the `caps`
 feature; a node that depends on that crate does not need this one by name.
