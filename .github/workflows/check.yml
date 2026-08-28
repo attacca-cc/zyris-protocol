@@ -43,6 +43,17 @@ jobs:
       - name: cargo build
         run: cargo build --workspace
 
+      # **The other TLS provider, which nothing else compiles.** `--workspace` builds every member
+      # with its default features and no provider is one of them; the test step below turns on
+      # `zyris/enroll`, and `enroll = ["dep:reqwest", "tls-ring"]` — so `tls-ring` is reached and
+      # `tls-aws-lc` is not, by any invocation in this file. That matters because
+      # `zyris-core/src/tls.rs` has a *separate* `install_chosen_provider` body behind that cfg, and
+      # because `zyris-core`'s docs.rs metadata is `all-features = true` — so the first machine ever
+      # to compile it would have been the doc builder, where a failure is a permanently red page on
+      # the crate everyone reads. One build, and it stays compiled.
+      - name: cargo build (the aws-lc provider)
+        run: cargo build -p zyris-core --no-default-features --features client,tls-aws-lc
+
       # Includes zyris-macros' trybuild UI tests, which compare compiler diagnostics against
       # checked-in .stderr files — they are the reason a toolchain bump can fail this job on its own.
       #

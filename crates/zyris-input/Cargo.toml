@@ -9,11 +9,23 @@ readme = "README.md"
 keywords = ["zyris", "input", "keyboard", "mouse", "automation"]
 categories = ["network-programming", "os", "api-bindings"]
 # **This is the one implementation crate that cannot be published, and the `enigo` dependency below
-# is the whole reason.** crates.io refuses any crate whose manifest names a git source, so a crate
-# carrying that fork can never go up. Splitting the reference implementations out of `zyris-capkit`
-# was about confining that: `zyris-fs`, `zyris-terminal`, `zyris-transfer` and `zyris-screen` are
-# publishable now, and only this one waits. The way out is upstreaming the fork's two patches, not
-# a `[patch]` anywhere — see the comment on the dependency.
+# is the whole reason.** Splitting the reference implementations out of `zyris-capkit` was about
+# confining that: `zyris-fs`, `zyris-terminal`, `zyris-transfer` and `zyris-screen` are publishable
+# now, and only this one waits. The way out is upstreaming the fork's two patches, not a `[patch]`
+# anywhere — see the comment on the dependency.
+#
+# **`publish = false` is what stops it, and the reason matters more than it looks.** An earlier
+# version of this comment said crates.io refuses any manifest naming a git source. It does not, for
+# the form used below: a dependency carrying *both* `version` and `git` packages happily, and cargo
+# **silently drops the `git` and `rev`**. Measured with a throwaway crate carrying this exact line —
+# `cargo package --no-verify` succeeded and the packaged manifest read:
+#
+#     [dependencies.enigo]
+#     version = "0.6.1"
+#     features = ["x11rb"]
+#
+# Upstream `enigo`, not the fork, with nothing said. What catches it in practice is the verification
+# build `--no-verify` skips, and what catches it reliably is the line below.
 publish = false
 
 [dependencies]

@@ -18,8 +18,14 @@ first release is also the first time this procedure runs end to end.
 
 **`zyris-input` and `zyris-capkit` carry `publish = false`.** `zyris-input` pins
 [a fork of `enigo`](https://github.com/ridanit-ruma/enigo-zyris) carrying two patches upstream does
-not have, and crates.io refuses any manifest whose graph names a git source; the way out is
-upstreaming those patches, not working around the rule. `zyris-capkit` is the re-export shell the
+not have; the way out is upstreaming those patches, not working around the rule.
+
+**`publish = false` is doing that work, and nothing else is.** crates.io does *not* refuse a
+manifest naming a git source when the dependency also carries a `version` — cargo packages it and
+**silently drops the `git` and `rev`**. Measured with a throwaway crate carrying `zyris-input`'s own
+enigo line: `cargo package --no-verify` succeeded and the packaged manifest named upstream
+`enigo 0.6.1`. So **never pass `--no-verify` to a real publish** — the verification build is what
+would have caught it, and the opt-out is the only other thing standing there. `zyris-capkit` is the re-export shell the
 old single-crate consumers move through, and it inherits the same problem by naming `zyris-input`.
 
 `every_crate_that_says_it_publishes_can` in `crates/zyris/tests/crate_boundary.rs` holds both halves
