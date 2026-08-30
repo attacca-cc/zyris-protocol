@@ -80,6 +80,18 @@ jobs:
         # skipped silently rather than failing — which would make it a guard that guards nothing.
         run: cargo test --workspace --features zyris-transfer/send,zyris-transfer/listen,zyris/enroll
 
+      # **The providerless build, which no other step above runs a single test of.** Everything
+      # before this either builds without running (`cargo build`) or unions `zyris/enroll` — and
+      # `enroll = ["dep:reqwest", "tls-ring"]` — into `zyris-core`, so `tls-ring` is on and the
+      # `not(any(tls-ring, tls-aws-lc))` half of `tests/tls_provider.rs` compiles to nothing. That
+      # half is where `ConnectError::NoTlsProvider` is asserted at all: that a build with no
+      # provider refuses by name rather than panicking inside rustls, and that it decides so before
+      # opening a socket. `-p zyris-core` takes this crate's own defaults, and its dev-dependency
+      # `zyris` asks for `client` and `hostname` and no provider, which is exactly the cfg those
+      # tests need. Without this line they are three tests nothing has ever executed.
+      - name: cargo test (no TLS provider)
+        run: cargo test -p zyris-core
+
       # Each transfer feature alone. `--workspace` above unions them, which is exactly the shape
       # that hid `listen` not compiling without `send`: `transfer/listen.rs` reached
       # `super::send::Rendezvous`, so the manifest's claim that the two are independent was false
