@@ -32,6 +32,32 @@ does not serve `screen_capture` can pass any `Vec<Display>` it knows.
 `EnigoInput::new` fails on a headless host, which is the answer a node wants at startup: if there
 is no display server, do not announce `input` at all.
 
+## Coordinates
+
+`move_to` takes display-local **captured** pixels — the pixels a `screen_capture.screenshot` of
+that display is made of, and the same space `Display::width`, `Display::x` and `Region` are in. So
+a position read off a screenshot goes in unchanged: subtract the region origin and multiply by the
+factor the image's description names, and nothing else. `Display::scale_factor` is not applied on
+the way, and the display's own position on the desktop is added here rather than by the caller.
+
+That coupling is the reason `Displays` lives in `zyris-caps` rather than in either implementation,
+and it is easy to break from the other side: a supplier that reports a display in some space other
+than its picture's aims the pointer somewhere the screenshot never showed. `zyris-screen`'s README
+has the two platforms where that has actually happened.
+
+### Known wrong: `libei`, so GNOME and KDE
+
+The `libei` backend does not honour that. libei hands each device a region, and its offsets and
+extents are in **logical** pixels with the physical scale alongside — but `move_mouse` calls
+`motion_absolute` with the caller's numbers untouched, and the regions it collected are never read
+at all. So on a fractionally scaled GNOME or KDE session the pointer lands short of where the
+screenshot said, by the display's scale factor.
+
+Nothing above is wrong about the contract; this backend simply does not meet it yet, and it is the
+only backend that works on those two desktops. It is off by default, so a build that has not opted
+into `libei` is unaffected. Fixing it means resolving the position against the device's own region
+before the call, in the fork — not in this crate, which cannot see the regions.
+
 ## Two extra backends on Linux, both off by default
 
 | Feature | Backend | The session it is for |

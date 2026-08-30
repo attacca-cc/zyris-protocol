@@ -37,6 +37,43 @@ re-encoded smaller until it fits. When that happens the image says so: its descr
 display's real size and the factor to multiply image coordinates by, which is what a caller needs
 before feeding a position from a screenshot into `input.move_to`.
 
+## Coordinates: one space, and it is the picture's
+
+Every number in a `Display`, every `Region`, and both coordinates of `input.move_to` are in one
+space — **captured pixels**, the pixels a `screenshot` of that display is actually made of.
+`Display::width` and `height` are by definition the size of the image an uncropped, undownscaled
+capture returns. `x` and `y` place that display's top-left corner on the virtual desktop in the
+same space, so adding them to a display-local position gives a whole-desktop one and subtracting
+them reverses it. `scale_factor` is reported so a caller can talk about the display the way its
+desktop environment does; it is never a factor to apply to the fields above.
+
+Where a platform's advertised geometry and its captured image disagree, the image is the contract
+and the geometry is the defect. Two places that bites:
+
+- **GNOME's Xwayland at a fractional scale.** `xcap` divides the RandR geometry by a scale it takes
+  from `wl_output`, but under Xwayland mutter inflates that geometry by an *integer* scale
+  (`ceil` of the highest monitor scale) — so numerator and denominator come from different
+  windowing systems and no factor relates the result to the picture. Measured on a 1920x1080 panel
+  at 125%: `xcap` says 2457x1382 at scale 1.25, that product is 3071x1728, and a capture is
+  1920x1080. This crate reads `wl_output`'s current mode there instead of deriving. The error is
+  `ceil(s)/s`, which is 1 at every integer scale — so 100% and 200% were always fine, and only
+  fractional scaling was ever wrong.
+- **macOS in a scaled Retina mode**, in the other direction: the system renders to an oversized
+  backing store and hands *that* back, so the picture is larger than the physical panel. It is
+  still the right answer, because it is what you receive and what a region is cropped from.
+
+Two things are known wrong and are not fixed here. A **second monitor on GNOME** gets a correct
+advertised size and still the wrong pixels — `xcap` crops the compositor's screenshot from the
+origin rather than from the monitor's rectangle, which is upstream's to fix. **Rotation** is
+unverified: `wl_output`'s mode is pre-transform where RandR's geometry is post-transform, so a
+rotated output may now report a transposed size.
+
+The pointer half has a gap of its own, in the other crate: `zyris-input`'s `libei` backend — the
+only one that works on GNOME and KDE — passes a position to libei without resolving it against the
+device region, and that region is in logical pixels. So on those two desktops a fractionally scaled
+`move_to` lands short even though the display is now described correctly. It is off by default and
+documented in `zyris-input`'s README.
+
 ## Two ways in on Wayland
 
 A Wayland compositor does not let a client read the screen, and `ScreenBackend::detect` picks

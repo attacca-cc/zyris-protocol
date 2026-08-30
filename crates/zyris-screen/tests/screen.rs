@@ -1,17 +1,80 @@
+use std::io::Write;
+use std::sync::Once;
 use std::time::Duration;
 
 use zyris::{Blob, Datum, Node, NodeKind};
 use zyris_caps::{ImageFormat, ScreenCapture, ScreenCaptureClient, ScreenCaptureServer};
 use zyris_screen::{image, HostScreenCapture, ScreenBackend};
 
+/// Set this in a job that is supposed to have a compositor, and a missing display becomes a
+/// failure instead of a silent pass.
+///
+/// The tests below are the only thing in this repository that can see whether a display's
+/// advertised size is the size of its picture, and they need a real screen to see it. On a
+/// headless runner they return early — so a headless green and a real green are the same green,
+/// and the coordinate bug this variable exists because of sat through a release behind one.
+const REQUIRE: &str = "ZYRIS_SCREEN_REQUIRE_DISPLAY";
+
+/// Whether a missing display is a failure rather than a skip.
+///
+/// A value that means "no" does not turn it on. `REQUIRE=0` reads as "no" to everyone who types
+/// it, and a guard that took it for "yes" would fail the job of the one person who was trying to
+/// opt out — which is the only person who would ever set it to that.
+fn skip_is_fatal(setting: Option<&str>) -> bool {
+    !matches!(setting.map(str::trim), None | Some("") | Some("0") | Some("false"))
+}
+
+/// What a skipped run says.
+///
+/// Built as a value so the wording is testable. Softening this into a line a reader skims past is
+/// how it stops working, and there is nothing else in a green log to notice.
+fn skip_notice() -> String {
+    format!(
+        "\n\
+         ================================================================\n\
+         SKIPPED, NOT PASSED — zyris-screen's coordinate contract\n\
+         \n\
+         There is no display here, so the tests that check whether a\n\
+         display's advertised size is the size of its picture did not\n\
+         run. The `ok` beside them means they returned early, not that\n\
+         the contract holds.\n\
+         \n\
+         Set {REQUIRE}=1 on a job that has a\n\
+         compositor to make this a failure instead.\n\
+         ================================================================\n"
+    )
+}
+
 /// CI and headless dev boxes have no compositor to capture. Ask the backend directly rather than
 /// letting the capability report a failure we cannot tell apart from a real bug.
+///
+/// Says so on the way past, once per binary — and through [`std::io::stderr`] rather than
+/// `eprintln!`. **That is not a long way of writing `eprintln!`.** libtest captures the `print!`
+/// and `eprint!` macros and replays them only for tests that *fail*, so an `eprintln!` here is
+/// invisible in exactly the green log it is written for. Measured, on this suite's own harness: a
+/// passing test's `eprintln!` produced no output at all under plain `cargo test`, while a write to
+/// the `stderr()` handle came through. The handle is not routed through that capture, so this
+/// survives without anyone having to pass `--nocapture`.
 fn has_a_display() -> bool {
-    match ScreenBackend::detect() {
+    let found = match ScreenBackend::detect() {
         #[cfg(target_os = "linux")]
         ScreenBackend::Wayland => true,
         ScreenBackend::Xcap => matches!(zyris_screen::xcap::Monitor::all(), Ok(m) if !m.is_empty()),
+    };
+    if !found {
+        static SAID_IT: Once = Once::new();
+        SAID_IT.call_once(|| {
+            let mut stderr = std::io::stderr();
+            let _ = stderr.write_all(skip_notice().as_bytes());
+            let _ = stderr.flush();
+        });
+        assert!(
+            !skip_is_fatal(std::env::var(REQUIRE).ok().as_deref()),
+            "{REQUIRE} is set, so this job is meant to be testing the coordinate contract \
+             against a real screen — and there is no display here, so it tested nothing"
+        );
     }
+    found
 }
 
 async fn serve(screen: HostScreenCapture) -> ScreenCaptureClient {
@@ -48,7 +111,6 @@ fn description(datum: &Datum) -> &str {
 #[tokio::test]
 async fn lists_displays() {
     if !has_a_display() {
-        eprintln!("skipping: no display attached");
         return;
     }
     let screen = connect().await;
@@ -64,7 +126,6 @@ async fn lists_displays() {
 #[tokio::test]
 async fn screenshots_the_primary_display_as_png() {
     if !has_a_display() {
-        eprintln!("skipping: no display attached");
         return;
     }
     let screen = connect().await;
@@ -87,7 +148,6 @@ async fn screenshots_the_primary_display_as_png() {
 #[tokio::test]
 async fn each_display_captures_at_its_advertised_size() {
     if !has_a_display() {
-        eprintln!("skipping: no display attached");
         return;
     }
     let screen = serve(HostScreenCapture::default().without_budget()).await;
@@ -116,7 +176,6 @@ async fn each_display_captures_at_its_advertised_size() {
 #[tokio::test]
 async fn the_default_budget_holds_on_a_real_screen() {
     if !has_a_display() {
-        eprintln!("skipping: no display attached");
         return;
     }
     let screen = connect().await;
@@ -163,7 +222,6 @@ async fn the_default_budget_holds_on_a_real_screen() {
 #[tokio::test]
 async fn max_width_downscales_and_format_selects_jpeg() {
     if !has_a_display() {
-        eprintln!("skipping: no display attached");
         return;
     }
     let screen = connect().await;
@@ -183,7 +241,6 @@ async fn max_width_downscales_and_format_selects_jpeg() {
 #[tokio::test]
 async fn a_region_crops_and_an_unknown_display_is_rejected() {
     if !has_a_display() {
-        eprintln!("skipping: no display attached");
         return;
     }
     let screen = connect().await;
@@ -204,4 +261,52 @@ async fn a_region_crops_and_an_unknown_display_is_rejected() {
         .await
         .unwrap_err();
     assert!(format!("{err}").contains("no-such-display"), "{err}");
+}
+
+// --- The guards on the guard ---
+//
+// These three need no display, so they are what CI actually runs here. They do not check the
+// coordinate contract — nothing headless can — they check that a run which *could not* check it
+// says so, loudly enough and in every test, and that the way to demand a real screen works.
+
+/// The notice has to keep saying the thing that makes a reader stop scrolling.
+#[test]
+fn a_skipped_run_says_it_did_not_pass() {
+    let notice = skip_notice();
+    assert!(notice.contains("SKIPPED, NOT PASSED"), "{notice}");
+    assert!(notice.contains(REQUIRE), "{notice}");
+    assert!(notice.contains("did not"), "{notice}");
+}
+
+/// Demanding a real screen is opt-in, and opting *out* has to be possible with the value everyone
+/// reaches for. A guard that read `REQUIRE=0` as "yes" would fail the one job trying to say no.
+#[test]
+fn only_a_setting_that_means_yes_turns_a_skip_into_a_failure() {
+    assert!(!skip_is_fatal(None));
+    assert!(!skip_is_fatal(Some("")));
+    assert!(!skip_is_fatal(Some("  ")));
+    assert!(!skip_is_fatal(Some("0")));
+    assert!(!skip_is_fatal(Some("false")));
+
+    assert!(skip_is_fatal(Some("1")));
+    assert!(skip_is_fatal(Some("required")));
+    assert!(skip_is_fatal(Some("true")));
+}
+
+/// Every test in this file needs a screen, and every one of them has to say so.
+///
+/// A new test written without the guard does not skip on a headless box — it fails there, on a
+/// contributor's laptop and on CI, for a reason that has nothing to do with what it was testing.
+/// The needles are split so this test does not count itself.
+#[test]
+fn every_test_that_needs_a_screen_asks_for_one() {
+    let src = include_str!("screen.rs");
+    let needing = src.matches(concat!("#[tokio", "::test]")).count();
+    let asking = src.matches(concat!("if !has_a_display", "() {")).count();
+    assert_eq!(
+        needing, asking,
+        "{needing} tests take a screen but {asking} guard on having one — a test that skips \
+         quietly is the whole problem, and one that forgets to skip is a red build on every \
+         headless machine"
+    );
 }

@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libclang-dev libxcb1-dev libxrandr-dev \
             libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev libgbm-dev \
-            libxkbcommon-dev
+            libxkbcommon-dev xvfb
 
       - name: cargo build
         run: cargo build --workspace
@@ -74,6 +74,14 @@ jobs:
       # display first and returns early when there is none, so on a headless runner they pass by
       # doing nothing. That is weaker than it sounds and is on purpose — compiling them is what
       # catches a backend that stopped building, which is the failure this job can actually see.
+      #
+      # **This step cannot see the coordinate contract, and now says so out loud.** Whether a
+      # display's advertised size is the size of its picture needs a screen, and a bug in exactly
+      # that reached a release-blocking moment behind a headless green. `has_a_display` prints a
+      # banner naming the tests that did not run — through `std::io::stderr()` rather than
+      # `eprintln!`, because libtest captures the print macros and replays them only for tests that
+      # *fail*, so the obvious spelling is invisible in precisely this log. Measured both ways
+      # before it was written that way. The step after this one is the half that does the checking.
       - name: cargo test
         # `zyris/enroll` is here so the `facade_probe` example is compiled: it declares
         # `required-features = ["enroll"]`, and a target whose features are not enabled is
@@ -91,6 +99,36 @@ jobs:
       # tests need. Without this line they are three tests nothing has ever executed.
       - name: cargo test (no TLS provider)
         run: cargo test -p zyris-core
+
+      # **The half of the coordinate contract a hosted runner can actually check.** Above, these
+      # tests have no screen and return early; here they get one, and `ZYRIS_SCREEN_REQUIRE_DISPLAY`
+      # makes a missing display a failure — so this step cannot go green by doing nothing, which is
+      # the failure mode the whole arrangement exists to remove. Artifacts are warm from the step
+      # above, so it costs a test run and an apt package.
+      #
+      # Xvfb is the cheap option that is still real: an X server whose root window is actually
+      # backed. That matters twice over. `xcap`'s X11 path captures with `GetImage` on the root, and
+      # it finds no `Xft.dpi` there, so its scale falls to `unwrap_or(1.0)` and the advertised
+      # geometry, the RandR geometry and the captured image are all one number. The contract holds
+      # by construction — which is the point: it catches a backend that enumerates in one space and
+      # captures in another, the shape of the bug this guards against.
+      #
+      # It does **not** reproduce that bug. Fractional scaling needs a compositor doing Xwayland's
+      # integer-scale trick, and no GitHub-hosted runner has one. Two known gaps, in order of value:
+      # a headless `sway` (`WLR_BACKENDS=headless`) would exercise the Wayland backend, which
+      # nothing anywhere tests today; a headless `mutter` would reproduce the fractional-scale case
+      # itself, but needs `gnome-shell` or `xdg-desktop-portal-gnome` for the screenshot, and a
+      # scale set through `ApplyMonitorsConfig` reverts after 20 seconds on GNOME 50 unless applied
+      # twice.
+      #
+      # Rootless Xwayland is *not* a substitute and was measured to fail: `GetImage` on its root
+      # returns BadMatch at every size, 256x256 included, because the root is not viewable.
+      - name: cargo test (the coordinate contract, against a real X server)
+        env:
+          ZYRIS_SCREEN_REQUIRE_DISPLAY: "1"
+        run: |
+          xvfb-run -a --server-args="-screen 0 1920x1080x24 +extension RANDR" \
+            cargo test -p zyris-screen --test screen
 
       # Each transfer feature alone. `--workspace` above unions them, which is exactly the shape
       # that hid `listen` not compiling without `send`: `transfer/listen.rs` reached

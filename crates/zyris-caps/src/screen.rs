@@ -2,6 +2,30 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use zyris::{Datum, WireError};
 
+/// One monitor, and one coordinate space for everything said about it.
+///
+/// **Every number here, every [`Region`], and both coordinates of `input.move_to` are in captured
+/// pixels — the pixels a `screen_capture.screenshot` of this display is actually made of.** There
+/// is no second space and no conversion between them: a position read off a screenshot is added to
+/// nothing and multiplied by nothing before it is passed back in, beyond undoing a `region` origin
+/// and a downscale the image's own description names.
+///
+/// That is the whole contract, and it is stated on the type because two crates implement it and
+/// neither can see the other. Getting it wrong does not look like a bug from inside either one:
+/// `list_displays` answers, `screenshot` answers, and only the rectangle lands somewhere the
+/// caller did not mean — off-centre for a region, and on the wrong pixel for a pointer.
+///
+/// Two consequences an implementer has to take on, because they are the ones that have actually
+/// been got wrong here:
+///
+/// - **Where a platform's advertised geometry and its captured image disagree, the image wins.**
+///   The geometry is the defect. An implementation that cannot reach the image's size by
+///   arithmetic on what the platform told it has been handed the wrong numbers and has to get the
+///   right ones somewhere else — it must not scale the wrong ones and report the result.
+/// - **"Captured" is not always "the panel".** macOS renders a scaled Retina mode to an oversized
+///   backing store and hands that back; the picture is larger than the physical screen and is
+///   still the right answer, because it is what the caller receives and what a `Region` is cropped
+///   from. An implementation that "corrects" it to the panel breaks every coordinate that follows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Display {
     /// Stable identifier for this display, as reported by the platform.
@@ -15,21 +39,39 @@ pub struct Display {
     pub x: i32,
     #[serde(default)]
     pub y: i32,
-    /// Size in physical pixels: the pixels a `screenshot` of this display is made of, and the ones
-    /// `input.move_to` takes. `x` and `y` are in the same space.
+    /// Size in captured pixels: the width and height of the image an uncropped, undownscaled
+    /// `screenshot` of this display returns. `x` and `y` are in the same space, and so are the
+    /// coordinates `input.move_to` takes.
+    ///
+    /// Where a platform's advertised geometry and its captured image disagree, **the image is the
+    /// contract and the geometry is the defect.** An implementation that cannot reach the image's
+    /// size by arithmetic on what the platform told it has been handed the wrong numbers and has
+    /// to get the right ones somewhere else; it must not scale the wrong ones and report that.
+    /// This is not hypothetical, and the silence here is what licensed the bug that added these
+    /// sentences: on GNOME's Xwayland at a fractional scale the reported size and the scale come
+    /// from two different windowing systems and no factor relates them to the picture, so
+    /// `zyris-screen` reads `wl_output` there rather than deriving.
+    ///
+    /// Note that "captured" is not always "the panel". macOS renders a scaled Retina mode to an
+    /// oversized backing store and hands *that* back, so the picture is larger than the physical
+    /// screen — and the picture is still the right answer, because it is what the caller receives,
+    /// what a `Region` is cropped from, and what a position fed to `input.move_to` refers to.
     pub width: u32,
     pub height: u32,
     /// Physical pixels per logical pixel. `1.0` on a display that is not scaled.
     ///
     /// Reported for a caller that needs to talk about the display the way its desktop environment
-    /// does. It is not something to apply to the fields above — those are already physical.
+    /// does. It is not a factor to apply to the fields above — and that holds for an implementation
+    /// filling them in just as much as for a caller reading them, which is the direction this had
+    /// to be widened in. Those fields are in the space the picture is in, and a scale is not
+    /// reliably what gets you there.
     #[serde(default)]
     pub scale_factor: f32,
     #[serde(default)]
     pub primary: bool,
 }
 
-/// A region of a display, in display-local physical pixels — the same space as [`Display`] and as
+/// A region of a display, in display-local captured pixels — the same space as [`Display`] and as
 /// the coordinates `input.move_to` takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Region {
@@ -70,7 +112,7 @@ pub trait ScreenCapture {
     /// Capture a still image of a display (optionally cropped to a region).
     ///
     /// `display` matches a [`Display::id`] first and a [`Display::name`] second; `None` picks the
-    /// primary display. `region` is in display-local physical pixels.
+    /// primary display. `region` is in display-local captured pixels — see [`Display::width`].
     ///
     /// `format` and `max_width` exist because a full-resolution PNG of a 4K display is several
     /// megabytes, and a `Datum::Image` travels inline in the response — `zyris::proto::
@@ -85,7 +127,7 @@ pub trait ScreenCapture {
     /// the returned `Datum::Image` describes what happened — its `description` names the display's
     /// real size and the factor to multiply image coordinates by. Read it before feeding a
     /// position from a screenshot into `input.move_to`: that call takes the same `display` and the
-    /// same display-local physical pixels, so the downscale factor and the `region` origin are the
+    /// same display-local captured pixels, so the downscale factor and the `region` origin are the
     /// whole conversion — the display's own position on the desktop is `move_to`'s to add, not
     /// yours, and [`Display::scale_factor`] plays no part.
     async fn screenshot(
