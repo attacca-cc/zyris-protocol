@@ -101,6 +101,15 @@ C compiler is charged. `crates/zyris/tests/toolchain_cost.rs` measures all of it
 Say this in the release notes. It is the first thing a new consumer hits and the only part of the
 build cost that is not obvious from the feature names.
 
+The other thing worth a line there is the **display coordinate contract**, because it is the one
+promise in this release that a consumer builds on top of and cannot check from the outside: every
+number in a `Display`, every `Region` and both coordinates of `input.move_to` are in captured
+pixels — the pixels a screenshot is made of — and where a platform's advertised geometry disagrees
+with its picture, the picture wins. `zyris-caps`'s `Display` states it, and `zyris-screen`'s README
+carries it to crates.io along with what is still known wrong (a second monitor on GNOME, rotation,
+and `zyris-input`'s `libei` backend). That README is baked into the tarball, so anything left
+unsaid there stays unsaid until the next version.
+
 ## Version
 
 One `version` in `[workspace.package]`, so every crate moves together. Bump it there, and remember

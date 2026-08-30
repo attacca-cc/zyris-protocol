@@ -57,6 +57,12 @@ fn covers_origin(output: &OutputInfo) -> bool {
 /// The origin is the exact conversion only while every output shares a scale — a mixed-scale
 /// wlroots layout has no single physical grid to place them on. `EnigoInput::move_to` refuses a
 /// multi-output Wayland layout for a related reason, so nothing depends on the inexact case.
+///
+/// `physical_size` is `wl_output`'s current mode, which is *pre*-transform: `libwayshot` rotates
+/// the buffer itself when building a frame, so on a 90-degree output the picture is this size
+/// transposed and the size reported here is wrong. Unverified either way — there was no rotated
+/// screen to measure — and the same caveat applies to `xcap_backend`, which now reads this number
+/// on Xwayland. `each_display_captures_at_its_advertised_size` is where it would surface.
 fn describe(output: &OutputInfo) -> Display {
     let region = output.logical_region.inner;
     // `OutputInfo::scale` is private upstream; it is this ratio.

@@ -147,7 +147,7 @@ fn button(button: MouseButton) -> enigo::Button {
 
 /// Resolve the display a display-local position falls on.
 ///
-/// `x` and `y` are display-local **physical** pixels — the pixels a `screen_capture.screenshot` of
+/// `x` and `y` are display-local **captured** pixels — the pixels a `screen_capture.screenshot` of
 /// this display is made of, so a position read off a screenshot goes straight in. That is the space
 /// [`Display`] is reported in too; the backends normalise there so nothing here has to choose one.
 ///
@@ -181,6 +181,21 @@ fn local<'a>(displays: &'a [Display], wanted: &str, x: i32, y: i32) -> zyris::Re
 /// come out in a row in a different order, and the origin added here names a point on another
 /// monitor. That is what `wayland` and [`move_on_output`] are for: in a wlroots session there is
 /// no whole-desktop coordinate to translate into at all.
+///
+/// **`ScreenBackend::Xcap` joined that hazard on GNOME and KDE, and it is their default path.**
+/// Until `zyris-screen` was corrected, its origins were Xwayland's — `logical x ceil(scale)` — and
+/// so were its sizes, so they matched what XTEST wanted and only the *picture* was wrong. The
+/// correction moved both to the panel's own pixels, because a display's advertised size has to be
+/// the size of its picture. XTEST still wants the other space. At a fractional scale the two differ
+/// by `ceil(s)/s`, so a second monitor at logical `1536` is advertised at `1920` and XTEST expects
+/// `3072` — and a pointer aimed with `move_to` lands short.
+///
+/// **A single monitor at the origin is unaffected**, which is every desktop this has been measured
+/// on and the reason no test here catches it. The honest scope is: on GNOME or KDE, at a fractional
+/// scale, with more than one monitor, `move_to` on a display other than the first is wrong. Serving
+/// `input` there wants `libei` (the `libei` feature), which addresses outputs directly and never
+/// adds an origin; XTEST cannot be made right from this side, because the space it wants is not the
+/// space the picture is in.
 fn target(displays: &[Display], wanted: &str, x: i32, y: i32) -> zyris::Result<(i32, i32)> {
     let display = local(displays, wanted, x, y)?;
     let (x, y) = (display.x + x, display.y + y);
