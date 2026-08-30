@@ -50,7 +50,18 @@ impl Audit {
         text.push('\n');
         let mut f =
             tokio::fs::OpenOptions::new().create(true).append(true).open(&self.path).await?;
-        f.write_all(text.as_bytes()).await
+        f.write_all(text.as_bytes()).await?;
+        // **`write_all` alone does not put the bytes anywhere a reader can see.**
+        // `tokio::fs::File` buffers, and its own documentation says so: *"A file will not be
+        // closed immediately when it is dropped, you should call `flush` before dropping it."*
+        // So the line could still be in this process when `record` returned, and this log is one
+        // of the three defences the crate has — losing a line is losing the record that a file
+        // was overwritten. It surfaced as a test reading the log it had just written and finding
+        // it empty, which is the same defect wearing a smaller hat.
+        //
+        // `flush`, not `sync_all`: getting the bytes to the operating system is what a reader
+        // needs, and an fsync per transferred file is a cost this log does not have to charge.
+        f.flush().await
     }
 }
 
@@ -101,6 +112,47 @@ mod tests {
         let line: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
         assert_eq!(line["replaced"], true);
         assert!(line["undo"].is_null(), "an overwrite without a backup must show up in the log");
+    }
+
+    /// Every recorded transfer is in the log, once, in the order it was recorded.
+    ///
+    /// This log is read to find out what happened to a file, so a missing line and a line out of
+    /// sequence both answer that question wrongly, and neither was pinned before.
+    ///
+    /// **It does not guard the `flush` in `write`, and I could not make it.** That defect —
+    /// `tokio::fs::File` buffers, so a line written without flushing may never reach a reader —
+    /// was found by a CI run where `overwrite_without_backup_shows_up_in_the_log` read the log it
+    /// had just written and found it empty. Removing the flush again and running this test
+    /// sixty-four lines at a time went green three times in a row here: the flush that `File`'s
+    /// drop schedules wins the race on this machine, every time. So the guard against that
+    /// regression is tokio's documentation and the comment in `write`, not a test — and saying so
+    /// is worth more than a test named as though it were watching.
+    #[tokio::test]
+    async fn every_recorded_transfer_reaches_the_log_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transfers.log");
+        let audit = Audit::new(&path);
+
+        const LINES: usize = 64;
+        for n in 0..LINES {
+            audit.record(AuditLine { name: format!("file-{n}"), ..one_line() }).await;
+        }
+
+        let text = tokio::fs::read_to_string(&path).await.unwrap();
+        let names: Vec<String> = text
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["name"].to_string())
+            .collect();
+        assert_eq!(
+            names.len(),
+            LINES,
+            "{} of {LINES} transfers reached the log — a transfer with no line in it is a file \
+             that was written to someone's machine with no record that it happened",
+            names.len()
+        );
+        for (n, got) in names.iter().enumerate() {
+            assert_eq!(got, &format!("\"file-{n}\""), "line {n} is out of order: {got}");
+        }
     }
 
     #[tokio::test]
