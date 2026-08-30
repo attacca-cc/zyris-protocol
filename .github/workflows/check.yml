@@ -123,12 +123,20 @@ jobs:
       #
       # Rootless Xwayland is *not* a substitute and was measured to fail: `GetImage` on its root
       # returns BadMatch at every size, 256x256 included, because the root is not viewable.
+      #
+      # **`--test-threads=1`, because a display is one shared thing.** Run in parallel against Xvfb
+      # these tests took two capabilities down with
+      # `WireError { code: Internal, message: "Connection error, possible I/O error" }` — xcb's own
+      # words — while the contract test beside them passed. Every one of them opens its own X
+      # connection and reads the same root window, so there is nothing to gain from overlapping
+      # them and one shared server to lose. Nine tests that finish in under a second do not need
+      # the concurrency.
       - name: cargo test (the coordinate contract, against a real X server)
         env:
           ZYRIS_SCREEN_REQUIRE_DISPLAY: "1"
         run: |
           xvfb-run -a --server-args="-screen 0 1920x1080x24 +extension RANDR" \
-            cargo test -p zyris-screen --test screen
+            cargo test -p zyris-screen --test screen -- --test-threads=1
 
       # Each transfer feature alone. `--workspace` above unions them, which is exactly the shape
       # that hid `listen` not compiling without `send`: `transfer/listen.rs` reached
