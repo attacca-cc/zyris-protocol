@@ -45,6 +45,43 @@ async fn dialling_wss_without_a_tls_provider_is_refused_by_name() {
     assert!(said.contains("tls-aws-lc"), "the message must name both providers, got {said:?}");
 }
 
+/// The other half of the promise the gate makes in `node.rs` — "before the socket, because this is
+/// a fact about the build and the network has no say in it". The test above dials a port with
+/// nothing on it, where a gate that ran *after* the socket would give an indistinguishable answer,
+/// so until this test the ordering was asserted by a comment and by nothing else. It is the half
+/// that matters for `is_fatal`: a refusal decided from the build is one no reconnect loop can talk
+/// its way past, and a refusal decided from the network is one it will retry forever.
+///
+/// Here something *is* listening, and never accepts. A TCP handshake into a listening socket is
+/// completed by the kernel and waits in the backlog whether or not the program ever asks for it,
+/// so a single non-blocking `accept` afterwards settles the question outright — no sleep, no
+/// timing, no second thread. `WouldBlock` means nothing ever connected.
+#[cfg(not(any(feature = "tls-ring", feature = "tls-aws-lc")))]
+#[tokio::test]
+async fn the_refusal_is_decided_before_anything_reaches_the_network() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("no loopback port");
+    let address = listener.local_addr().expect("no local address");
+
+    let url = format!("wss://{address}/zyris/v1/ws");
+    let Err(error) = probe().dial(&url, "znt_whatever").await else {
+        panic!("this build selected no TLS provider, so the dial cannot have succeeded");
+    };
+    assert!(
+        matches!(error, ConnectError::NoTlsProvider),
+        "a listening port does not change what refused this, got {error:?}"
+    );
+
+    listener.set_nonblocking(true).expect("the listener can be asked without waiting");
+    match listener.accept() {
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+        Ok(_) => panic!(
+            "a connection reached the listener, so the provider was checked after a socket had \
+             already been opened; the refusal has to be decided from the build alone"
+        ),
+        Err(e) => panic!("the listener could not be asked whether anything arrived: {e}"),
+    }
+}
+
 /// The gate is the scheme, not the dial. `ws://` carries no TLS, so a provider is not what stops
 /// it — refusing it here would break every plaintext deployment for a reason that does not apply.
 #[cfg(not(any(feature = "tls-ring", feature = "tls-aws-lc")))]

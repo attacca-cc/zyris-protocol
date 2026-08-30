@@ -81,6 +81,20 @@ zyris = { path = "../zyris" }
 # the `commit-msg` one enforces Conventional Commits. Set
 # CARGO_HUSKY_DONT_INSTALL_HOOKS=true to skip installation.
 cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }
+# `tests/tls_handshake.rs` only. A loopback TLS listener needs a certificate, and generating one
+# per run is what keeps a private key out of a public repository and keeps the suite from turning
+# red on an expiry date nobody chose. `default-features = false` names the pieces deliberately:
+# `ring` here is rcgen's *own* `dep:ring`, not `rustls/ring`, so a dev-dependency cannot hand
+# rustls a provider and quietly delete the providerless build this crate's `tls_provider.rs`
+# tests. Already in the workspace lock through `iroh`, so it costs no new resolution.
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+# The server half of the same test. `tokio-tungstenite` already builds this exact crate at these
+# exact features one level down — `default-features = false` is what keeps that true, because the
+# defaults are `["logging", "tls12", "aws_lc_rs"]` and taking them would drag `aws-lc-sys` and its
+# cmake build into every `cargo test -p zyris-core`.
+tokio-rustls = { version = "0.26", default-features = false }
+# Somewhere to put the test CA so `SSL_CERT_FILE` can point at it.
+tempfile.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
