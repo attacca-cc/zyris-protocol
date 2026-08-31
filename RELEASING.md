@@ -89,6 +89,25 @@ plainly satisfies.
 A release of `zyris` that cannot be combined with any implementation is not the smaller half of this
 release. It is a different, worse one.
 
+## Who owns them
+
+`cargo owner --add ridanit-ruma` — the personal account, alone, and it is worth saying why rather
+than leaving it to look like an oversight.
+
+**A crate name is never given back.** crates.io has one exception, RFC 3660: a crate can be deleted
+if it is under 72 hours old, *or* if it has a **single owner**, fewer than 500 downloads a month,
+and nothing on the registry depending on it. Adding a `github:attacca-cc:<team>` owner removes the
+single-owner branch outright and leaves only the 72-hour window. So the order is not symmetric:
+personal first and a team later keeps the escape hatch; a team first spends it before the first
+mistake has had a chance to show.
+
+That is the whole argument, and it costs something real — the repository lives under `attacca-cc`
+while the crates would answer to one person, and that person is the bus factor for eleven permanent
+names. Add the team once the release has settled.
+
+**`github:ridanit-ruma:<team>` is not a thing.** crates.io team ownership takes a GitHub
+*organization*; `ridanit-ruma` is a user account and has no teams. The bare login is the form.
+
 ## What a consumer gets
 
 `cargo add zyris` builds on a machine with a Rust toolchain and nothing else — no C compiler, no
