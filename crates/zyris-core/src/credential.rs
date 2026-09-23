@@ -71,7 +71,11 @@ impl std::fmt::Debug for Credential {
 
 /// The first three bytes plus an ellipsis — enough to recognise which credential this was
 /// (`zc_` is the only prefix that ships) without printing anything a reader could dial with.
-fn redacted(secret: &str) -> String {
+///
+/// `pub(crate)` rather than private: `enroll::protocol::TokenResponse` carries the same raw
+/// `zc_` before it becomes a `Credential`, and its hand-written `Debug` reuses this rather than
+/// growing a second redaction rule that could drift from this one.
+pub(crate) fn redacted(secret: &str) -> String {
     let prefix: String = secret.chars().take(3).collect();
     format!("{prefix}…")
 }

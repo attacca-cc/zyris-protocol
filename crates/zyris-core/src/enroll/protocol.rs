@@ -52,7 +52,7 @@ pub struct AuthorizeResponse {
     pub interval: i32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct TokenResponse {
     /// `zc_…`.
     pub credential: String,
@@ -64,6 +64,21 @@ pub struct TokenResponse {
     /// deployment.
     #[serde(default)]
     pub owner_email: String,
+}
+
+/// Hand-written rather than derived, for the same reason as `Credential`'s: `credential` is the
+/// raw `zc_` this response carries before `credential_from` turns it into one, and a `Debug`
+/// printed to a log by accident must not be the whole bearer.
+impl std::fmt::Debug for TokenResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenResponse")
+            .field("credential", &crate::credential::redacted(&self.credential))
+            .field("system", &self.system)
+            .field("program", &self.program)
+            .field("scopes", &self.scopes)
+            .field("owner_email", &self.owner_email)
+            .finish()
+    }
 }
 
 /// The RFC 6749 §5.2 error body. `interval` is Attacca's addition, so a node can adopt the
@@ -345,5 +360,12 @@ mod tests {
         assert_eq!(token.system.slug, "laptop");
         assert_eq!(token.program.id, "cred-1");
         assert_eq!(token.scopes, vec!["agents:read".to_string()]);
+
+        // `Debug` is hand-written to redact `credential`; a derive here would put the whole
+        // bearer in the first log line anyone prints this to.
+        assert!(
+            !format!("{token:?}").contains("zc_new"),
+            "the raw credential must not appear in Debug output"
+        );
     }
 }
