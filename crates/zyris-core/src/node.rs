@@ -1,6 +1,6 @@
 use std::sync::Arc;
 #[cfg(feature = "client")]
-use std::sync::OnceLock;
+use std::sync::Mutex;
 #[cfg(feature = "client")]
 use std::time::{Duration, Instant};
 
@@ -10,12 +10,16 @@ use futures_util::future::BoxFuture;
 use tokio::sync::watch;
 
 use crate::capabilities::{Capabilities, CapabilitySet};
+#[cfg(feature = "client")]
+use crate::connection::ConnectionInfo;
 use crate::connection::{establish, AcceptOptions, Connection, Role};
 #[cfg(feature = "client")]
 use crate::error::{ConnectError, TransportError};
 use crate::error::Result;
 use crate::serve::ServeCapability;
 use crate::transport::Transport;
+#[cfg(feature = "client")]
+use zyris_proto::NodeAddress;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeKind {
@@ -318,11 +322,12 @@ fn is_fatal(error: &ConnectError) -> bool {
 /// this node in a way no retry can fix.
 #[cfg(feature = "client")]
 pub struct Link {
-    /// Set once. Identity comes from the token — `Hello` carries no node id and the server answers
-    /// with one — so a redial with the same token lands on the same node and there is nothing here
-    /// for a reconnect to change. Empty until the first connection comes up, which is the window a
-    /// caller sees when the very first dial was merely unreachable.
-    node_id: Arc<OnceLock<String>>,
+    /// The handshake facts of the connection this link is on now, replaced on every connect. A
+    /// node lives only as long as its connection, so a reconnect that did not resume comes back
+    /// with a new node id — and a new name if the old one was still taken. `None` until the first
+    /// connection comes up, which is the window a caller sees when the very first dial was merely
+    /// unreachable.
+    current: Arc<Mutex<Option<ConnectionInfo>>>,
     /// Dropped when the link is, which is why letting a `Link` go ends it: the loop's receiver
     /// errors and it reads that the same way it reads being asked.
     stop: watch::Sender<bool>,
@@ -331,9 +336,16 @@ pub struct Link {
 
 #[cfg(feature = "client")]
 impl Link {
-    /// The node id the server assigned, from the `HelloAck` of the connection this link is on.
-    pub fn node_id(&self) -> &str {
-        self.node_id.get().map(String::as_str).unwrap_or_default()
+    /// The node id the server assigned, from the `HelloAck` of the connection this link is on now.
+    /// Empty before the first connection.
+    pub fn node_id(&self) -> String {
+        self.current.lock().unwrap().as_ref().map(|info| info.node_id.clone()).unwrap_or_default()
+    }
+
+    /// Where the server put this node, from the latest `HelloAck`. `None` before the first
+    /// connection, for a `cli` node, and against a server that assigns no address.
+    pub fn address(&self) -> Option<NodeAddress> {
+        self.current.lock().unwrap().as_ref().and_then(|info| info.node.clone())
     }
 
     /// Resolves when the link is finished: [`disconnect`](Link::disconnect) was called, or the
@@ -380,17 +392,14 @@ impl Link {
                 None
             }
         };
-        let node_id = Arc::new(OnceLock::new());
         // Recorded here rather than left to the task: the connection is already in hand, and a
-        // caller that reads `node_id` on the line after `connect` returned must not race a spawn.
-        if let Some(conn) = &first {
-            let _ = node_id.set(conn.info().node_id.clone());
-        }
+        // caller that reads `address` on the line after `connect` returned must not race a spawn.
+        let current = Arc::new(Mutex::new(first.as_ref().map(|conn| conn.info().clone())));
         let (stop, stop_rx) = watch::channel(false);
         let (done, _) = watch::channel::<Option<Ending>>(None);
         let done = Arc::new(done);
-        tokio::spawn(maintain(redial, on_connect, first, node_id.clone(), stop_rx, done.clone()));
-        Ok(Link { node_id, stop, done })
+        tokio::spawn(maintain(redial, on_connect, first, current.clone(), stop_rx, done.clone()));
+        Ok(Link { current, stop, done })
     }
 }
 
@@ -404,13 +413,15 @@ async fn maintain(
     redial: Redial,
     on_connect: Option<ConnectHook>,
     first: Option<Connection>,
-    node_id: Arc<OnceLock<String>>,
+    current: Arc<Mutex<Option<ConnectionInfo>>>,
     mut stop: watch::Receiver<bool>,
     done: Arc<watch::Sender<Option<Ending>>>,
 ) {
     let mut backoff = BACKOFF_MIN;
-    let mut current = first;
-    if current.is_none() {
+    // Named apart from `current` (the link's shared, latest-connection record): this is only the
+    // eager first dial, handed off to the loop below and then gone.
+    let mut held = first;
+    if held.is_none() {
         // The eager dial already failed. Dialling again this instant would make the first retry
         // the only one that never waited.
         let (widened, asked) = wait_then_widen(backoff, &mut stop).await;
@@ -428,7 +439,7 @@ async fn maintain(
             return;
         }
 
-        let conn = match current.take() {
+        let conn = match held.take() {
             Some(conn) => conn,
             None => match redial().await {
                 Ok(conn) => conn,
@@ -450,7 +461,7 @@ async fn maintain(
             },
         };
 
-        let _ = node_id.set(conn.info().node_id.clone());
+        *current.lock().unwrap() = Some(conn.info().clone());
         tracing::info!(
             node_id = %conn.info().node_id,
             conn_id = %conn.info().conn_id,
@@ -597,6 +608,61 @@ mod link_tests {
         let assigned = served.lock().unwrap()[0].info().node_id.clone();
         assert!(!assigned.is_empty(), "the acceptor assigns one");
         assert_eq!(link.node_id(), assigned, "the link reports what the acceptor assigned");
+    }
+
+    /// [`duplex_redial`], with the acceptor assigning `probe`, then `probe-2`, `probe-3`… — what a
+    /// server does when the old name has not been freed yet.
+    fn addressed_redial(served: Arc<Mutex<Vec<Connection>>>, dials: Arc<AtomicUsize>) -> Redial {
+        Arc::new(move || {
+            let served = served.clone();
+            let dials = dials.clone();
+            Box::pin(async move {
+                let n = dials.fetch_add(1, Ordering::SeqCst) + 1;
+                let name = if n == 1 { "probe".to_string() } else { format!("probe-{n}") };
+                let options = AcceptOptions {
+                    node: Some(NodeAddress {
+                        system: "laptop".into(),
+                        program: "zyris-code".into(),
+                        name,
+                    }),
+                    ..AcceptOptions::default()
+                };
+                let dialer = Node::builder().name("probe").kind(NodeKind::Service).build().unwrap();
+                let acceptor =
+                    Node::builder().name("server").kind(NodeKind::Server).build().unwrap();
+                let (mine, theirs) = crate::testing::duplex_with(&dialer, &acceptor, options)
+                    .await
+                    .map_err(|e| ConnectError::Unreachable(TransportError::Io(e.to_string())))?;
+                served.lock().unwrap().push(theirs);
+                Ok(mine)
+            }) as BoxFuture<'static, Result<Connection, ConnectError>>
+        })
+    }
+
+    /// A node lives only as long as its connection, so a reconnect that did not resume is a new
+    /// node: a new id, and a new name when the old one was still taken. A link that kept reporting
+    /// the first answer would name a node that no longer exists.
+    #[tokio::test]
+    async fn a_link_reports_the_node_it_is_on_now_not_the_first_one() {
+        let served = Arc::new(Mutex::new(Vec::new()));
+        let dials = Arc::new(AtomicUsize::new(0));
+        let link = Link::start(addressed_redial(served.clone(), dials.clone()), None)
+            .await
+            .expect("an in-process duplex comes up");
+        assert_eq!(
+            link.address().map(|address| address.path()),
+            Some("laptop/zyris-code/probe".to_string())
+        );
+        let first_id = link.node_id();
+
+        served.lock().unwrap()[0].close("server restarting");
+        wait_until("took the new address", || {
+            link.address().map(|address| address.name) == Some("probe-2".to_string())
+        })
+        .await;
+
+        assert_ne!(link.node_id(), first_id, "a connection that did not resume is a new node");
+        assert_eq!(link.node_id(), served.lock().unwrap()[1].info().node_id);
     }
 
     /// Everything a connect hook does is per connection: publishing where this node can be
