@@ -89,8 +89,8 @@ impl Hello for HelloWorld {
 
 /// What this program calls itself when it enrols. It is fixed on the credential.
 const PROGRAM: &str = "hello";
-/// What each connection asks to be called. A second one live under the same credential is told
-/// `hello-2`.
+/// What each connection asks to be called. A second one live at the same `system/program` path —
+/// even under a different credential named `hello` — is told `hello-2`.
 const NODE_NAME: &str = "hello";
 
 #[tokio::main]
@@ -115,7 +115,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(say_connect)?;
 
     // Read the address back rather than assuming the name asked for: it is the path a tool call is
-    // routed by, and it ends in `hello-2` whenever another `hello` is live on this credential.
+    // routed by, and it ends in `hello-2` whenever another `hello` is live at the same
+    // `system/program` path, across every credential with that program name.
     let placed = link.address().map(|address| address.path()).unwrap_or_else(|| link.node_id());
     println!("serving hello.greet as {placed}; Ctrl-C to stop");
 
@@ -173,10 +174,15 @@ async fn take_a_credential(server: &str) -> Result<Credential, Box<dyn std::erro
     };
 
     // It never expires and never rotates, so a real program writes it down here — a file, a
-    // keychain, a Secret — and reads it back on every start instead of enrolling again.
+    // keychain, a Secret — and reads it back on every start instead of enrolling again. This
+    // example has nowhere of its own to write it, so the secret is printed once: the person who
+    // just approved it in a browser is the one who can act on it, and without the value here the
+    // instruction to "set ZYRIS_CREDENTIAL" is not something they could actually follow.
     println!(
-        "issued for {}/{}; set ZYRIS_CREDENTIAL to skip this next time",
-        credential.system.slug, credential.program.slug
+        "issued for {}/{}: {}\n\
+         store this; it never expires — revoke it in Attacca when done. Set ZYRIS_CREDENTIAL to \
+         this value to skip enrolling next time.",
+        credential.system.slug, credential.program.slug, credential.secret
     );
     Ok(credential)
 }
