@@ -3,7 +3,7 @@
 //! Dependency weight is smaller than it looks: `tokio-tungstenite` already pulls in `rustls`,
 //! `tokio-rustls`, and the native root store, so `reqwest` configured without default features
 //! **reuses that TLS stack** — the marginal cost is the hyper/tower layer. It is off by default, so
-//! a node using a static `znt_` pays nothing for it.
+//! a node handed its credential some other way pays nothing for it.
 //!
 //! **Nothing here writes to a console and nothing here loops forever.** The code a person types
 //! comes back as a value, and whether that becomes a printed block, a window in a TUI, or a line
@@ -11,18 +11,23 @@
 
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::account::AccountCredential;
+use crate::credential::{Credential, CREDENTIAL_VERSION};
 use crate::enroll::protocol::{
     AuthorizeRequest, AuthorizeResponse, ClientHint, ErrorResponse, PollOutcome, PollState,
     TokenResponse,
 };
 use crate::{EnrollError, TransportError};
 
-/// What a node asks to be enrolled as. The scopes are granted with the credential and never widen
-/// afterwards, so this is the one moment they can be chosen.
+/// What a program asks to be enrolled as. The scopes are granted with the credential and never
+/// widen afterwards, so this is the one moment they can be chosen.
 #[derive(Debug, Clone)]
 pub struct EnrollRequest {
-    pub name: String,
+    /// The program's own name — `zyris-code`. Fixed on the credential; a second approval of the
+    /// same program on the same system becomes `zyris-code-2`.
+    pub program: String,
+    /// What this machine calls itself (`zyris::machine_name()`), so the approval screen can
+    /// preselect that system. A hint, never verified.
+    pub system_hint: String,
     pub platform: String,
     pub scopes: Vec<String>,
 }
@@ -40,7 +45,7 @@ pub struct Code {
 pub enum Progress {
     /// Nobody has answered yet; the code is good for this much longer.
     Waiting { remaining: Duration },
-    Granted(AccountCredential),
+    Granted(Credential),
     /// The code timed out. Call [`Enrollment::renew`] for a fresh one — this crate never asks for
     /// one on its own, because a loop the caller cannot end is a program, not a library.
     Lapsed,
@@ -95,50 +100,36 @@ impl Round {
 /// The whole flow, which is also the only compile-checked account of it:
 ///
 /// ```no_run
-/// use zyris::{Account, AccountCredential, EnrollRequest, Node, NodeSpec, RotateError};
+/// use zyris::{Credential, EnrollRequest, Node};
 ///
 /// # async fn flow() -> Result<(), Box<dyn std::error::Error>> {
 /// let server = "wss://attacca.cc/api/zyris/v1/ws";
 ///
-/// // The code comes back as a value. Showing it is the caller's decision — a node with a
-/// // full-screen UI draws it in a window, and this crate writes to no console either way.
+/// // Once per program and machine. The code comes back as a value; showing it is the caller's
+/// // decision, and this crate writes to no console either way.
 /// let mut enrollment = zyris::enroll(
 ///     server,
 ///     EnrollRequest {
-///         name: "my node".to_string(),
+///         program: "my-program".to_string(),
+///         system_hint: "laptop".to_string(),
 ///         platform: "linux".to_string(),
-///         scopes: vec!["nodes:write".to_string()],
+///         scopes: vec!["agents:read".to_string()],
 ///     },
 /// )
 /// .await?;
 /// show(&enrollment.code().user_code, &enrollment.code().verification_uri);
-/// let credential: AccountCredential = enrollment.wait().await?;
+/// let credential: Credential = enrollment.wait().await?;
+/// // It never expires and never rotates: store it once, read it back on every start.
+/// save(&credential)?;
 ///
-/// // A refresh token is single-use, so a rotation is offered to the caller and adopted only once
-/// // the caller says it is stored. A crash between "used" and "saved" is how a node gets revoked.
-/// let account = Account::restore(server, credential)
-///     .on_rotate(|rotated: AccountCredential| async move {
-///         save(&rotated).map_err(|error| RotateError(error.to_string()))
-///     })
-///     .build();
-///
-/// // One account credential, as many nodes as you like. The token never expires and never
-/// // rotates, so it is this node's identity across restarts — store it, do not mint another.
-/// let token = account
-///     .register_node(NodeSpec {
-///         name: "my node".to_string(),
-///         platform: Some("linux".to_string()),
-///         scopes: vec![],
-///     })
-///     .await?;
-///
-/// // `connect` keeps the link up; `Node::dial` is the single attempt underneath it.
-/// let link = Node::builder().name("my node").build()?.connect(server, &token).await?;
+/// // Every start. Each connection is a node, named here; the server answers with where it put it.
+/// let link = Node::builder().name("myrepo").build()?.connect(server, credential.secret()).await?;
+/// let _placed = link.address(); // e.g. laptop/my-program/myrepo
 /// link.wait_closed().await?;
 /// # Ok(())
 /// # }
 /// # fn show(_code: &str, _uri: &str) {}
-/// # fn save(_credential: &zyris::AccountCredential) -> std::io::Result<()> { Ok(()) }
+/// # fn save(_credential: &zyris::Credential) -> std::io::Result<()> { Ok(()) }
 /// ```
 pub async fn enroll(server_url: &str, request: EnrollRequest) -> Result<Enrollment, EnrollError> {
     // Before the builder, not after: on the `rustls-no-provider` feature reqwest
@@ -152,7 +143,8 @@ pub async fn enroll(server_url: &str, request: EnrollRequest) -> Result<Enrollme
         .map_err(unreachable_because)?;
     let base_url = http_base(server_url);
     let request = AuthorizeRequest {
-        name: request.name,
+        program: request.program,
+        system_hint: request.system_hint,
         platform: request.platform,
         scopes: request.scopes,
         client_hint: local_client_hint(),
@@ -197,7 +189,7 @@ impl Enrollment {
 
         if response.status().is_success() {
             let token: TokenResponse = response.json().await.map_err(unreachable_because)?;
-            return Ok(Progress::Granted(credential_from(&token)));
+            return Ok(Progress::Granted(credential_from(token)));
         }
 
         let error = parse_error(response).await;
@@ -231,7 +223,7 @@ impl Enrollment {
     ///
     /// A lapsed code ends this rather than renewing itself; call [`renew`](Self::renew) and wait
     /// again if that is what the program wants.
-    pub async fn wait(&mut self) -> Result<AccountCredential, EnrollError> {
+    pub async fn wait(&mut self) -> Result<Credential, EnrollError> {
         loop {
             match self.poll().await? {
                 Progress::Waiting { .. } => continue,
@@ -273,15 +265,15 @@ fn unknown_scope(body: &str) -> Option<String> {
     Some(value.get("scope")?.as_str()?.to_string())
 }
 
-pub(crate) fn credential_from(token: &TokenResponse) -> AccountCredential {
-    AccountCredential::new(
-        token.access_token.clone(),
-        token.refresh_token.clone(),
-        token.node_id.clone(),
-        token.node_name.clone(),
-        token.owner_email.clone(),
-        now_unix() + token.expires_in,
-    )
+fn credential_from(token: TokenResponse) -> Credential {
+    Credential {
+        version: CREDENTIAL_VERSION,
+        secret: token.credential,
+        system: token.system,
+        program: token.program,
+        scopes: token.scopes,
+        owner_email: token.owner_email,
+    }
 }
 
 pub(crate) async fn post<T: serde::Serialize + ?Sized>(
@@ -362,13 +354,6 @@ fn hostname() -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-pub(crate) fn now_unix() -> i64 {
-    SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 // zyris:nothing below this ships. Everything past this line is `#[cfg(test)]`, and the console
 // scan in `mod tests` bounds itself here rather than at the first `#[cfg(test)]` it finds, which
 // would move the moment another test helper landed above shipping code. New shipping code goes
@@ -425,15 +410,17 @@ pub(crate) fn scripted_responder(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::credential::Named;
 
     const FIRST_CODE: &str = r#"{"device_code":"zdc_secret","user_code":"WXQR-7KBD","verification_uri":"https://attacca.example/settings/zyris/device","expires_in":600,"interval":1}"#;
     const SECOND_CODE: &str = r#"{"device_code":"zdc_second","user_code":"HTPL-2FMR","verification_uri":"https://attacca.example/settings/zyris/device","expires_in":600,"interval":1}"#;
-    const GRANTED: &str = r#"{"access_token":"zna_new","refresh_token":"znr_new","expires_in":3600,"scope":"agents:read","node_id":"node-7","node_name":"hello node","owner_email":"allen@example.com"}"#;
+    const GRANTED: &str = r#"{"credential":"zc_new","system":{"id":"sys-1","name":"laptop","slug":"laptop"},"program":{"id":"cred-1","name":"hello node","slug":"hello-node"},"scopes":["agents:read"],"owner_email":"allen@example.com"}"#;
     const PENDING: &str = r#"{"error":"authorization_pending"}"#;
 
     fn request() -> EnrollRequest {
         EnrollRequest {
-            name: "hello node".into(),
+            program: "hello node".into(),
+            system_hint: "laptop".into(),
             platform: "linux".into(),
             scopes: vec!["agents:read".into()],
         }
@@ -518,7 +505,7 @@ mod tests {
     /// `wait` is the convenience the documented loop collapses into: poll at the server's cadence
     /// until the grant settles. What comes out is the credential itself — the caller stores it.
     #[tokio::test]
-    async fn waiting_out_a_pending_grant_ends_with_the_account_credential() {
+    async fn waiting_out_a_pending_grant_ends_with_the_credential() {
         let url = scripted_responder(&[
             ("/device/authorize", "200 OK", FIRST_CODE),
             ("/device/token", "400 Bad Request", PENDING),
@@ -528,14 +515,15 @@ mod tests {
 
         let credential = enrollment.wait().await.expect("the person approved it");
 
-        assert_eq!(credential.access_token, "zna_new");
-        assert_eq!(credential.refresh_token, "znr_new");
-        assert_eq!(credential.node_id, "node-7");
-        assert_eq!(credential.owner_email, "allen@example.com");
-        assert!(
-            credential.bearer(now_unix(), 30).is_some(),
-            "a credential handed over already spent is not one"
+        assert_eq!(credential.secret(), "zc_new");
+        assert_eq!(credential.version, 2);
+        assert_eq!(
+            credential.system,
+            Named { id: "sys-1".into(), name: "laptop".into(), slug: "laptop".into() }
         );
+        assert_eq!(credential.program.slug, "hello-node");
+        assert_eq!(credential.scopes, vec!["agents:read".to_string()]);
+        assert_eq!(credential.owner_email, "allen@example.com");
     }
 
     /// A lapsed code is reported, not replaced. A library that fetches another one on its own has

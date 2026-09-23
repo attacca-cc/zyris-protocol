@@ -10,7 +10,7 @@
 //!
 //! `protocol` is always compiled and does no IO of its own, so the retry semantics are readable
 //! and testable with no server and no feature flag; `device` sits behind the non-default `enroll`
-//! feature so a node using a static `znt_` pays nothing for it.
+//! feature so a node handed its credential some other way pays nothing for it.
 //!
 //! `device` is the only driver: the code comes back as a value, and nothing here writes to a
 //! console or decides when to stop polling.
@@ -28,6 +28,6 @@ pub mod device;
 pub use device::{enroll, Code, EnrollRequest, Enrollment, Progress};
 
 pub use protocol::{
-    classify_refresh_error, AuthorizeRequest, AuthorizeResponse, ClientHint, ErrorResponse,
-    PollOutcome, PollState, RefreshOutcome, TokenResponse,
+    AuthorizeRequest, AuthorizeResponse, ClientHint, ErrorResponse, PollOutcome, PollState,
+    TokenResponse,
 };

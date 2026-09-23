@@ -143,9 +143,9 @@ impl Node {
     /// and anything else is the link's problem — it backs off and dials again. The link ends when
     /// [`Link::disconnect`] is called, when it is dropped, or when the server refuses this node.
     ///
-    /// The token is any bearer string: the `NodeToken` an account minted, or a `znt_` read out of a
-    /// secret manager. Requiring a type here would make a caller who never touches the account
-    /// layer learn it just to name one.
+    /// The token is any bearer string: `Credential::secret()` from an enrollment, or a `zc_` read
+    /// out of a secret manager. Requiring a type here would make a caller who never enrolls learn
+    /// it just to name one.
     #[cfg(feature = "client")]
     pub async fn connect(&self, url: &str, token: impl AsRef<str>) -> Result<Link, ConnectError> {
         let node = self.share();

@@ -1,9 +1,9 @@
 //! Every step of the flow, reached through `zyris` and nothing else.
 //!
-//! Nothing here names `zyris-core`, `zyris-caps` or `zyris-capkit`. Enrollment, the account layer,
-//! node registration, dialing and all four error enums are `zyris::…` paths, so if one of them ever
-//! stops being re-exported this file stops compiling and CI says so. `tokio` is the exception and
-//! has to be: a crate cannot hand out an async runtime.
+//! Nothing here names `zyris-core`, `zyris-caps` or `zyris-capkit`. Enrollment, the credential,
+//! dialing, the address the server assigns and both error enums are `zyris::…` paths, so if one of
+//! them ever stops being re-exported this file stops compiling and CI says so. `tokio` is the
+//! exception and has to be: a crate cannot hand out an async runtime.
 //!
 //! It is also runnable, and worth running against a real deployment once:
 //!
@@ -12,10 +12,7 @@
 //! ```
 
 use zyris::enroll::{EnrollRequest, Progress};
-use zyris::{
-    Account, AccountCredential, ConnectError, EnrollError, Link, Node, NodeKind, NodeSpec,
-    NodeToken, RegisterError, RotateError,
-};
+use zyris::{ConnectError, Credential, EnrollError, Link, Named, Node, NodeAddress, NodeKind};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,9 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut enrollment = zyris::enroll(
         &server,
         EnrollRequest {
-            name: "facade probe".to_string(),
+            program: "facade-probe".to_string(),
+            system_hint: zyris::machine_name().unwrap_or_default(),
             platform: std::env::consts::OS.to_string(),
-            scopes: vec!["agents:read".to_string(), "nodes:write".to_string()],
+            scopes: vec!["agents:read".to_string()],
         },
     )
     .await
@@ -40,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // `poll` honours the server's interval and RFC 8628's `slow_down` itself, so this loop does not
     // sleep. `Lapsed` is not renewed automatically: a loop that never ends belongs to a program.
-    let credential: AccountCredential = loop {
+    let credential: Credential = loop {
         match enrollment.poll().await.map_err(say_enroll)? {
             Progress::Waiting { remaining } => {
                 println!("waiting, {}s left", remaining.as_secs());
@@ -54,39 +52,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // 2. The account credential is the only thing that rotates. Where the rotation goes is the
-    //    caller's business, and the library waits for this to return Ok before using the new token.
-    let account = Account::restore(&server, credential)
-        .on_rotate(|rotated: AccountCredential| async move {
-            println!("rotated; node {} has a fresh pair", rotated.node_id);
-            Ok::<(), RotateError>(())
-        })
-        .build();
+    // 2. The credential is the whole of what enrollment hands back, and all of it is serde.
+    let Named { slug: system, .. } = &credential.system;
+    println!("issued to {system}/{} under {}", credential.program.slug, credential.owner_email);
 
-    let _bearer: String = account.bearer().await.map_err(say_enroll)?;
-
-    // 3. One credential, as many nodes as you want.
-    let token: NodeToken = account
-        .register_node(NodeSpec {
-            name: "facade probe node".to_string(),
-            platform: Some(std::env::consts::OS.to_string()),
-            scopes: vec!["agents:read".to_string()],
-        })
-        .await
-        .map_err(say_register)?;
-    println!("registered {} as {}", token.node_id, token.slug);
-
-    // 4. Connecting takes a bearer string, so a node holding a `znt_` out of a secret manager never
-    //    has to know the account layer exists.
+    // 3. Connecting takes a bearer string, so a node holding a `zc_` out of a secret manager never
+    //    has to know enrollment exists.
     let link: Link = Node::builder()
         .name("facade probe node")
-        .kind(NodeKind::Cli)
+        .kind(NodeKind::Service)
         .build()?
-        .connect(&server, &token)
+        .connect(&server, credential.secret())
         .await
         .map_err(say_connect)?;
 
-    println!("connected as {}", link.node_id());
+    // 4. Where the server put it.
+    let placed: Option<NodeAddress> = link.address();
+    println!(
+        "connected as {} ({})",
+        placed.map(|address| address.path()).unwrap_or_default(),
+        link.node_id()
+    );
     link.disconnect().await;
     Ok(())
 }
@@ -95,8 +81,6 @@ fn say_enroll(error: EnrollError) -> String {
     match error {
         EnrollError::Denied => "the request was declined".to_string(),
         EnrollError::Lapsed => "the code expired".to_string(),
-        // The one answer no retry and no fresh code can fix: the grant chain itself is dead.
-        EnrollError::Revoked => "revoked; authorize this node again".to_string(),
         EnrollError::ScopeUnknown { scope } => {
             format!("this deployment does not know the scope {scope}")
         }
@@ -104,22 +88,11 @@ fn say_enroll(error: EnrollError) -> String {
     }
 }
 
-fn say_register(error: RegisterError) -> String {
-    match error {
-        RegisterError::Forbidden => "this credential lacks nodes:write".to_string(),
-        RegisterError::ScopeExceeded { requested, granted } => {
-            format!("asked for {requested:?}, the account grants {granted:?}")
-        }
-        RegisterError::Revoked => "the account credential is dead; authorize it again".to_string(),
-        RegisterError::Unreachable(transport) => format!("worth retrying: {transport}"),
-    }
-}
-
 fn say_connect(error: ConnectError) -> String {
     match error {
         // The distinction the daemon needed an AtomicBool for: a person has to act.
         ConnectError::Revoked => "revoked; authorize this node again".to_string(),
-        ConnectError::Unauthorized => "the server did not accept this token".to_string(),
+        ConnectError::Unauthorized => "the server did not accept this credential".to_string(),
         // A 426 refuses the upgrade before either side has spoken the protocol, so there is
         // nothing on the wire to name the server's version; only a `HelloAck` mismatch fills it in.
         ConnectError::VersionMismatch { ours, theirs } => {

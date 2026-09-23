@@ -52,7 +52,8 @@ impl std::fmt::Display for CloseReason {
 /// revocation as an outage is a node that reconnects forever and never comes back.
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
-    /// The grant chain is dead. Nothing a retry can reach will change this answer.
+    /// The server revoked this credential while a connection made with it was up. Nothing a retry
+    /// can reach will change this answer.
     #[error("this credential was revoked; a person must authorize this node again")]
     Revoked,
     /// The token was judged and refused — a typo, a paste that lost a character, a `zna_` where a
@@ -92,18 +93,6 @@ impl From<WireError> for ConnectError {
     }
 }
 
-impl From<crate::enroll::protocol::RefreshOutcome> for ConnectError {
-    fn from(outcome: crate::enroll::protocol::RefreshOutcome) -> ConnectError {
-        use crate::enroll::protocol::RefreshOutcome;
-        match outcome {
-            RefreshOutcome::Dead(_) => ConnectError::Revoked,
-            RefreshOutcome::Unavailable(reason) => {
-                ConnectError::Unreachable(TransportError::Io(reason))
-            }
-        }
-    }
-}
-
 /// The major version the peer named, when it named one.
 ///
 /// The handshake knows exactly which major the peer speaks — it read a `HelloAck` — and puts the
@@ -125,9 +114,8 @@ fn peer_major(error: &WireError) -> Option<String> {
 
 /// Why an enrollment did not produce a credential.
 ///
-/// There is no revoked shade for the enrollment itself: enrolling is what a caller does when it
-/// has nothing to present. `Revoked` is here for the refresh that `Account::bearer` performs on a
-/// credential it was handed — a grant the server has since disowned, which no retry reaches.
+/// There is no revoked shade: enrolling is what a caller does when it has nothing to present, and a
+/// credential that stops working afterwards is refused at the dial, as `ConnectError::Unauthorized`.
 #[derive(Debug, thiserror::Error)]
 pub enum EnrollError {
     /// Somebody said no in the browser. Asking again is pestering them.
@@ -136,9 +124,6 @@ pub enum EnrollError {
     /// The code ran out its clock. Recoverable — ask for another one.
     #[error("the code expired")]
     Lapsed,
-    /// The grant chain is dead. A person must authorize this node again.
-    #[error("this credential was revoked; a person must authorize this node again")]
-    Revoked,
     /// A scope this build asked for does not exist on that deployment. Named, because the server's
     /// own 422 is a serde dump and a caller that cannot read it can only report that *something*
     /// in a list it wrote itself was wrong.
@@ -147,28 +132,3 @@ pub enum EnrollError {
     #[error("could not reach the server: {0}")]
     Unreachable(#[from] TransportError),
 }
-
-/// Why an account credential could not mint a node token.
-#[derive(Debug, thiserror::Error)]
-pub enum RegisterError {
-    /// The account credential was authorized without the one scope this needs.
-    #[error("this credential may not register nodes; it lacks nodes:write")]
-    Forbidden,
-    /// The server clamped the request to what the account grant covers. Both lists travel, so the
-    /// difference is a set operation rather than a sentence to parse.
-    #[error("requested scopes exceed this credential's grant")]
-    ScopeExceeded { requested: Vec<String>, granted: Vec<String> },
-    /// The account credential is dead; registering anything under it will keep failing.
-    #[error("this credential was revoked; a person must authorize this account again")]
-    Revoked,
-    #[error("could not reach the server: {0}")]
-    Unreachable(#[from] TransportError),
-}
-
-/// The caller's own words for why it could not store a rotated credential.
-///
-/// A string rather than an enum on purpose: this crate has no idea what a keychain, a Kubernetes
-/// Secret or a database column is, and inventing shades for them would be guessing.
-#[derive(Debug, thiserror::Error)]
-#[error("the credential could not be stored: {0}")]
-pub struct RotateError(pub String);

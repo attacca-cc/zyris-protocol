@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::credential::Named;
+
 /// Lower bound on any server-supplied interval. A server that answered `0` would otherwise turn a
 /// polite poller into a hot loop.
 pub const MIN_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -22,7 +24,10 @@ pub const SLOW_DOWN_STEP: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthorizeRequest {
-    pub name: String,
+    /// The program asking, as it names itself: `zyris-code`. Fixed on the credential.
+    pub program: String,
+    /// What this machine calls itself. The approval screen preselects the system of that name.
+    pub system_hint: String,
     pub platform: String,
     pub scopes: Vec<String>,
     pub client_hint: ClientHint,
@@ -49,16 +54,14 @@ pub struct AuthorizeResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenResponse {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub expires_in: i64,
-    #[serde(default)]
-    pub scope: String,
-    pub node_id: String,
-    #[serde(default)]
-    pub node_name: String,
-    /// The account the node just joined. Printed on success because, over SSH against a URL typed
-    /// from memory, this line is the only chance to notice you enrolled into the wrong deployment.
+    /// `zc_…`.
+    pub credential: String,
+    pub system: Named,
+    pub program: Named,
+    pub scopes: Vec<String>,
+    /// The account the credential was issued under. Printed on success because, over SSH against a
+    /// URL typed from memory, this line is the only chance to notice you enrolled into the wrong
+    /// deployment.
     #[serde(default)]
     pub owner_email: String,
 }
@@ -165,47 +168,6 @@ impl PollState {
         // than the node already backed off to would undo a `slow_down` it just issued.
         let proposed = clamp_interval(Duration::from_secs(interval_secs.max(0) as u64));
         self.interval = self.interval.max(proposed);
-    }
-}
-
-/// What a refused refresh means for the credential that was presented.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RefreshOutcome {
-    /// The grant chain is dead — the stored credential has to be discarded and the node enrolled
-    /// again. Nothing a retry can reach will change this answer.
-    Dead(String),
-    /// The server could not answer right now. The credential is very probably still good, so it is
-    /// kept and the whole thing is tried again later.
-    Unavailable(String),
-}
-
-/// Fold a refused refresh into the one decision that matters: keep the credential, or throw it away.
-///
-/// Only `invalid_grant` is fatal. On the refresh endpoint that code has exactly one meaning — the
-/// refresh token is unknown, expired, revoked, or was replayed past the reuse grace — and in every
-/// one of those cases the server will never honour it again.
-///
-/// Everything else is transient by default, deliberately: this classification decides whether a
-/// file gets deleted, and the two mistakes are not symmetric. Discarding a live credential drags a
-/// person back to a terminal to approve a code; keeping a dead one costs a backoff cycle. That
-/// asymmetry is also why the catch-all sits on this side — `parse_error` synthesises `http_503` and
-/// friends for bodies it could not read, and a proxy returning HTML mid-outage must not be able to
-/// unenroll a fleet.
-pub fn classify_refresh_error(error: &ErrorResponse) -> RefreshOutcome {
-    let described = match &error.error_description {
-        Some(description) => format!("{}: {description}", error.error),
-        None => error.error.clone(),
-    };
-    // The status outranks the body. Only `invalid_grant` kills a credential, and a server that
-    // could not answer has not told us the grant is dead — even if something in front of it put
-    // that word in the body. Both callers answer `Dead` by deleting the credential, so the cost
-    // of reading one 500 wrong is a fleet that has to re-enrol by hand.
-    if error.is_transient() {
-        return RefreshOutcome::Unavailable(described);
-    }
-    match error.error.as_str() {
-        "invalid_grant" => RefreshOutcome::Dead(described),
-        _ => RefreshOutcome::Unavailable(described),
     }
 }
 
@@ -348,54 +310,40 @@ mod tests {
         assert!(message.contains("unsupported_grant_type"));
     }
 
-    /// The one answer that means "this credential is gone" — and the reason has to survive, because
-    /// it is what gets logged immediately before a file is deleted.
+    /// The two bodies Attacca reads and writes, spelled out. A renamed field here is an enrollment
+    /// that passes every stub and fails against the live server.
     #[test]
-    fn only_invalid_grant_kills_a_stored_credential() {
-        let outcome = classify_refresh_error(&error("invalid_grant", None));
-        let RefreshOutcome::Dead(reason) = outcome else { panic!("expected dead") };
-        assert!(reason.contains("invalid_grant"));
-        assert!(reason.contains("because"), "the server's reason must survive");
-    }
-
-    /// The status outranks the body. Both callers answer `Dead` by deleting the credential, so a
-    /// proxy that manages to put `invalid_grant` in front of a 500 — a cached body, a error page
-    /// assembled from the wrong template — must not be able to unenroll a fleet.
-    #[test]
-    fn a_five_hundred_cannot_kill_a_credential_whatever_the_body_says() {
-        let response = ErrorResponse {
-            error: "invalid_grant".into(),
-            error_description: Some("because".into()),
-            interval: None,
-            status: Some(500),
+    fn the_device_grant_bodies_are_the_ones_the_server_speaks() {
+        let request = AuthorizeRequest {
+            program: "zyris-code".into(),
+            system_hint: "laptop".into(),
+            platform: "linux".into(),
+            scopes: vec!["agents:read".into()],
+            client_hint: ClientHint {
+                hostname: Some("laptop".into()),
+                os: Some("linux".into()),
+                agent: Some("zyris/0.3.0".into()),
+            },
         };
-        assert!(
-            matches!(classify_refresh_error(&response), RefreshOutcome::Unavailable(_)),
-            "a server that could not answer has not told us the grant is dead"
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            serde_json::json!({
+                "program": "zyris-code", "system_hint": "laptop", "platform": "linux",
+                "scopes": ["agents:read"],
+                "client_hint": {"hostname": "laptop", "os": "linux", "agent": "zyris/0.3.0"}
+            })
         );
-    }
 
-    /// The asymmetry this classification exists for: an outage must never unenroll a node. Every one
-    /// of these is a real answer from the refresh endpoint, and none of them means the grant is dead.
-    #[test]
-    fn a_server_having_a_bad_day_never_discards_a_credential() {
-        for kind in ["temporarily_unavailable", "slow_down", "server_error", "invalid_request"] {
-            assert!(
-                matches!(classify_refresh_error(&error(kind, None)), RefreshOutcome::Unavailable(_)),
-                "{kind} must not be treated as a dead grant"
-            );
-        }
-    }
-
-    /// `parse_error` synthesises this shape when the body is not JSON at all — an HTML error page
-    /// from a proxy mid-outage. Unreadable must not mean unenrolled.
-    #[test]
-    fn an_unreadable_error_body_is_transient_not_fatal() {
-        let synthetic =
-            ErrorResponse { error: "http_503".into(), error_description: None, interval: None, status: Some(503) };
-        let RefreshOutcome::Unavailable(reason) = classify_refresh_error(&synthetic) else {
-            panic!("a body we could not read tells us nothing about the grant")
-        };
-        assert_eq!(reason, "http_503", "with no description the code stands alone");
+        let token: TokenResponse = serde_json::from_str(
+            r#"{"credential":"zc_new",
+                "system":{"id":"sys-1","name":"laptop","slug":"laptop"},
+                "program":{"id":"cred-1","name":"zyris-code","slug":"zyris-code"},
+                "scopes":["agents:read"],"owner_email":"allen@example.com"}"#,
+        )
+        .unwrap();
+        assert_eq!(token.credential, "zc_new");
+        assert_eq!(token.system.slug, "laptop");
+        assert_eq!(token.program.id, "cred-1");
+        assert_eq!(token.scopes, vec!["agents:read".to_string()]);
     }
 }

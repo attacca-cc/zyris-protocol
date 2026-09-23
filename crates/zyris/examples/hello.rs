@@ -6,8 +6,8 @@
 //! so. `tokio` is the exception and has to be: a crate cannot hand out an async runtime.
 //!
 //! ```text
-//! # the short path — you already hold a node token
-//! ZYRIS_NODE_TOKEN=znt_… cargo run -p zyris --example hello --features enroll
+//! # the short path — you already hold a credential
+//! ZYRIS_CREDENTIAL=zc_… cargo run -p zyris --example hello --features enroll
 //!
 //! # the long path — no credential yet. Prints an 8-character code to approve in a browser.
 //! cargo run -p zyris --example hello --features enroll
@@ -19,19 +19,16 @@
 //!
 //! 1. **A capability.** One trait, one method, one derive-able answer. That is the whole surface a
 //!    node offers.
-//! 2. **A way to get a token.** Either read one, or enrol and register a node — the second is the
-//!    part with the 8-character code in it.
-//! 3. **A connection**, which serves the capability for as long as it is up.
+//! 2. **A way to get a credential.** Either read one, or enrol — the second is the part with the
+//!    8-character code in it.
+//! 3. **A connection**, which is a node for as long as it is up.
 //! 4. **Errors worth telling apart.** Every enum is matched exhaustively rather than printed, so
 //!    adding a variant upstream breaks this file instead of silently falling into a catch-all.
 
 use zyris::enroll::{EnrollRequest, Progress};
 use zyris::schemars::JsonSchema;
 use zyris::serde::{Deserialize, Serialize};
-use zyris::{
-    Account, AccountCredential, ConnectError, EnrollError, Link, Node, NodeKind, NodeSpec,
-    NodeToken, RegisterError, RotateError,
-};
+use zyris::{ConnectError, Credential, EnrollError, Link, Node, NodeKind};
 
 // ---------------------------------------------------------------------------------------------
 // 1. The capability
@@ -87,9 +84,13 @@ impl Hello for HelloWorld {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 2–4. Getting a token, connecting, and staying up
+// 2–4. Getting a credential, connecting, and staying up
 // ---------------------------------------------------------------------------------------------
 
+/// What this program calls itself when it enrols. It is fixed on the credential.
+const PROGRAM: &str = "hello";
+/// What each connection asks to be called. A second one live under the same credential is told
+/// `hello-2`.
 const NODE_NAME: &str = "hello";
 
 #[tokio::main]
@@ -99,9 +100,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // A node connects with a bearer string and nothing else. Where it came from — a secret
     // manager, a file, the enrollment below — is the program's business, never the library's.
-    let token = match std::env::var("ZYRIS_NODE_TOKEN") {
-        Ok(token) if !token.trim().is_empty() => token,
-        _ => take_a_node(&server).await?,
+    let secret = match std::env::var("ZYRIS_CREDENTIAL") {
+        Ok(secret) if !secret.trim().is_empty() => secret,
+        _ => take_a_credential(&server).await?.secret,
     };
 
     let link: Link = Node::builder()
@@ -109,11 +110,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .kind(NodeKind::Service)
         .capability(HelloServer(HelloWorld { node: NODE_NAME.to_string() }))
         .build()?
-        .connect(&server, &token)
+        .connect(&server, &secret)
         .await
         .map_err(say_connect)?;
 
-    println!("serving hello.greet as {}; Ctrl-C to stop", link.node_id());
+    // Read the address back rather than assuming the name asked for: it is the path a tool call is
+    // routed by, and it ends in `hello-2` whenever another `hello` is live on this credential.
+    let placed = link.address().map(|address| address.path()).unwrap_or_else(|| link.node_id());
+    println!("serving hello.greet as {placed}; Ctrl-C to stop");
 
     // `connect` keeps the link up across drops, so the only two ways out are the server giving up
     // on us and a person asking us to stop. Which of those ends the program is this program's
@@ -131,20 +135,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// The long path: no credential yet, so ask for one, then take a node under it.
+/// The long path: no credential yet, so ask for one.
 ///
 /// This is the only part of the file that prints anything a person has to act on, and it prints it
 /// because *this program* decided to. `enroll` hands the code back as a value; a library that
 /// printed it would put it underneath a TUI's own screen, or in a journal nobody reads.
-async fn take_a_node(server: &str) -> Result<String, Box<dyn std::error::Error>> {
+async fn take_a_credential(server: &str) -> Result<Credential, Box<dyn std::error::Error>> {
     let mut enrollment = zyris::enroll(
         server,
         EnrollRequest {
-            name: NODE_NAME.to_string(),
+            program: PROGRAM.to_string(),
+            // Lets the approval screen preselect this machine. A hint, never verified.
+            system_hint: zyris::machine_name().unwrap_or_default(),
             platform: std::env::consts::OS.to_string(),
-            // `nodes:write` is what lets the credential take a node below. Ask for nothing else:
-            // the scopes approved here are the ceiling for every node this credential ever takes.
-            scopes: vec!["nodes:write".to_string()],
+            // A node that only serves a tool calls nothing back, so it needs no scopes at all.
+            scopes: vec![],
         },
     )
     .await
@@ -155,7 +160,7 @@ async fn take_a_node(server: &str) -> Result<String, Box<dyn std::error::Error>>
     // `poll` honours the server's interval and RFC 8628's `slow_down` itself, so this loop does no
     // sleeping of its own. `Lapsed` is not renewed automatically: a loop that never ends belongs
     // to a program, not to a library.
-    let credential: AccountCredential = loop {
+    let credential: Credential = loop {
         match enrollment.poll().await.map_err(say_enroll)? {
             Progress::Waiting { .. } => {}
             Progress::Granted(credential) => break credential,
@@ -167,32 +172,13 @@ async fn take_a_node(server: &str) -> Result<String, Box<dyn std::error::Error>>
         }
     };
 
-    // The account credential is the one thing that rotates. Where the new pair goes is the
-    // caller's business, and the library will not use it until this returns `Ok` — so a program
-    // that writes it to disk cannot end up with a token the server has already retired.
-    let account = Account::restore(server, credential)
-        .on_rotate(|rotated: AccountCredential| async move {
-            // A real program stores `rotated` here. Losing it costs a re-enrollment.
-            let _ = rotated;
-            Ok::<(), RotateError>(())
-        })
-        .build();
-
-    let node: NodeToken = account
-        .register_node(NodeSpec {
-            name: NODE_NAME.to_string(),
-            platform: Some(std::env::consts::OS.to_string()),
-            scopes: vec![],
-        })
-        .await
-        .map_err(say_register)?;
-
-    // Read the slug back rather than assuming the name asked for. Two machines volunteering the
-    // same name is ordinary, so the server may hand back one it disambiguated — `hello`, then
-    // `hello-1` — and the slug is what a tool call is routed by.
-    println!("took node {} as {}", node.node_id, node.slug);
-    println!("set ZYRIS_NODE_TOKEN to skip this next time");
-    Ok(node.token)
+    // It never expires and never rotates, so a real program writes it down here — a file, a
+    // keychain, a Secret — and reads it back on every start instead of enrolling again.
+    println!(
+        "issued for {}/{}; set ZYRIS_CREDENTIAL to skip this next time",
+        credential.system.slug, credential.program.slug
+    );
+    Ok(credential)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -203,8 +189,6 @@ fn say_enroll(error: EnrollError) -> String {
     match error {
         EnrollError::Denied => "the request was declined".to_string(),
         EnrollError::Lapsed => "the code expired".to_string(),
-        // The one answer no retry and no fresh code can fix: the grant chain itself is dead.
-        EnrollError::Revoked => "revoked; authorize this node again".to_string(),
         EnrollError::ScopeUnknown { scope } => {
             format!("this deployment does not know the scope {scope}")
         }
@@ -212,22 +196,12 @@ fn say_enroll(error: EnrollError) -> String {
     }
 }
 
-fn say_register(error: RegisterError) -> String {
-    match error {
-        RegisterError::Forbidden => "this credential lacks nodes:write".to_string(),
-        RegisterError::ScopeExceeded { requested, granted } => {
-            format!("asked for {requested:?}, the account grants {granted:?}")
-        }
-        RegisterError::Revoked => "the account credential is dead; authorize it again".to_string(),
-        RegisterError::Unreachable(transport) => format!("worth retrying: {transport}"),
-    }
-}
-
 fn say_connect(error: ConnectError) -> String {
     match error {
-        // A person has to act on these two, and no amount of retrying substitutes.
+        // A person has to act on these two, and no amount of retrying substitutes. `Unauthorized`
+        // is also what a revoked or retired credential reads as: forget it and enrol again.
         ConnectError::Revoked => "revoked; authorize this node again".to_string(),
-        ConnectError::Unauthorized => "the server did not accept this token".to_string(),
+        ConnectError::Unauthorized => "the server did not accept this credential".to_string(),
         // A 426 refuses the upgrade before either side has spoken the protocol, so there is
         // nothing on the wire to name the server's version; only a `HelloAck` mismatch fills it in.
         ConnectError::VersionMismatch { ours, theirs } => {
