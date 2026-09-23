@@ -760,7 +760,11 @@ pub(crate) async fn establish(
                     // socket.
                     let refusal = Envelope::Err { id: 0, error: error.clone() };
                     let _ = send_handshake(&mut sink, &refusal).await;
-                    let _ = sink.close(CLOSE_NORMAL, error.message.clone()).await;
+                    // The full reason already went out in `refusal` above; the close frame is a
+                    // courtesy for whatever is watching at the transport level, and RFC 6455 caps
+                    // its reason at 123 bytes (125 minus the 2-byte code) — `decide` is free to
+                    // hand back an arbitrarily long `error.message`.
+                    let _ = sink.close(CLOSE_NORMAL, truncate_close_reason(&error.message)).await;
                     return Err(error);
                 }
             };
@@ -865,6 +869,21 @@ pub(crate) async fn establish(
         });
     }
     Ok(conn)
+}
+
+/// A websocket close frame's reason is capped at 123 bytes by RFC 6455 (125 for the whole
+/// control-frame payload, minus the 2-byte code). Cutting at a byte count alone can land inside a
+/// multi-byte UTF-8 character, so this backs up to the nearest character boundary instead.
+fn truncate_close_reason(message: &str) -> String {
+    const MAX_BYTES: usize = 123;
+    if message.len() <= MAX_BYTES {
+        return message.to_string();
+    }
+    let mut end = MAX_BYTES;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    message[..end].to_string()
 }
 
 async fn send_handshake(sink: &mut Box<dyn WireSink>, envelope: &Envelope) -> Result<()> {
@@ -1307,4 +1326,36 @@ fn handle_announce(shared: &Arc<Shared>, id: u64, params: Payload) {
 
 pub(crate) fn typed_method(capability: &str, tool: &str) -> String {
     method_name(capability, tool)
+}
+
+#[cfg(test)]
+mod close_reason_tests {
+    use super::truncate_close_reason;
+
+    /// A short reason is not this function's problem; it must come back untouched.
+    #[test]
+    fn a_reason_within_the_limit_is_left_alone() {
+        assert_eq!(truncate_close_reason("scope agents:write not granted"), "scope agents:write not granted");
+    }
+
+    /// RFC 6455's close-frame payload is 125 bytes total, 2 of which are the code, leaving 123
+    /// for the reason. A `decide` callback can hand back anything, so this is the backstop.
+    #[test]
+    fn a_reason_over_the_limit_is_cut_to_123_bytes() {
+        let long = "x".repeat(200);
+        let cut = truncate_close_reason(&long);
+        assert_eq!(cut.len(), 123);
+        assert_eq!(cut, "x".repeat(123));
+    }
+
+    /// Cutting at a raw byte count can land inside a multi-byte character; this must back up to
+    /// a character boundary instead of producing a string `String` would refuse to hold.
+    #[test]
+    fn the_cut_lands_on_a_char_boundary_not_mid_character() {
+        // Each "é" is 2 bytes, so 123 bytes lands exactly between the two bytes of one of them.
+        let long = "é".repeat(100);
+        let cut = truncate_close_reason(&long);
+        assert!(cut.len() <= 123);
+        assert!(std::str::from_utf8(cut.as_bytes()).is_ok(), "must still be valid UTF-8");
+    }
 }
