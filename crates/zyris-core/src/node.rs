@@ -198,7 +198,13 @@ impl NodeBuilder {
         self
     }
 
-    /// Name this node after the machine it runs on.
+    /// Name this **node** after the machine it runs on.
+    ///
+    /// The machine is already the *system* segment of the address — it is exactly what
+    /// `EnrollRequest::system_hint` is set to — so naming the node after it too yields paths that
+    /// repeat it: `laptop/zyris-code/laptop`. That is a legal name, not a bug, but a caller that
+    /// only wants the machine named once should set `EnrollRequest::system_hint` for that and
+    /// leave this for an actual node name, rather than calling it for both.
     ///
     /// A machine that has nothing usable to say about itself leaves the current name in place, so
     /// this is safe to chain after `name` as an override and before it as a default.
@@ -356,12 +362,21 @@ pub struct Link {
 impl Link {
     /// The node id the server assigned, from the `HelloAck` of the connection this link is on now.
     /// Empty before the first connection.
+    ///
+    /// Kept, not cleared, while the link is between connections and after it has ended — this
+    /// reads back the last id or address assigned, which a server may since have freed and
+    /// reassigned to a different node entirely. It names *a* node the link was, not necessarily
+    /// one that still exists.
     pub fn node_id(&self) -> String {
         self.current.lock().unwrap().as_ref().map(|info| info.node_id.clone()).unwrap_or_default()
     }
 
     /// Where the server put this node, from the latest `HelloAck`. `None` before the first
     /// connection, for a `cli` node, and against a server that assigns no address.
+    ///
+    /// Kept, not cleared, while the link is between connections and after it has ended, for the
+    /// same reason as [`node_id`](Self::node_id): the path it names may since have been freed and
+    /// reassigned.
     pub fn address(&self) -> Option<NodeAddress> {
         self.current.lock().unwrap().as_ref().and_then(|info| info.node.clone())
     }

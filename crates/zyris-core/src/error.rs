@@ -52,8 +52,9 @@ impl std::fmt::Display for CloseReason {
 /// revocation as an outage is a node that reconnects forever and never comes back.
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
-    /// The server revoked this credential while a connection made with it was up. Nothing a retry
-    /// can reach will change this answer.
+    /// Reserved for a deployment that watches for revocation on a live connection and closes it
+    /// in band — Attacca's heartbeat, for one. Nothing in this crate produces it today: a
+    /// revoked credential is simply unknown at the next dial, which reads as `Unauthorized`.
     #[error("this credential was revoked; a person must authorize this node again")]
     Revoked,
     /// The token was judged and refused — a `zc_` that was mistyped, revoked, or never issued, or

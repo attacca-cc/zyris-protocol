@@ -37,7 +37,7 @@ fn refusing_server(status_line: &'static str) -> String {
 #[tokio::test]
 async fn a_token_the_server_will_not_take_is_not_a_server_that_could_not_be_reached() {
     let url = refusing_server("401 Unauthorized");
-    let Err(refused) = zyris::transport::ws::connect(&url, "znt_wrong").await else {
+    let Err(refused) = zyris::transport::ws::connect(&url, "zc_wrong").await else {
         panic!("the server answered 401; that upgrade cannot have succeeded")
     };
 
@@ -52,7 +52,7 @@ async fn a_token_the_server_will_not_take_is_not_a_server_that_could_not_be_reac
 #[tokio::test]
 async fn a_deployment_this_build_cannot_speak_to_says_so_in_the_error() {
     let url = refusing_server("426 Upgrade Required");
-    let Err(refused) = zyris::transport::ws::connect(&url, "znt_fine").await else {
+    let Err(refused) = zyris::transport::ws::connect(&url, "zc_fine").await else {
         panic!("the server answered 426; that upgrade cannot have succeeded")
     };
 
@@ -72,7 +72,7 @@ async fn a_socket_that_never_opened_is_reported_as_unreachable() {
     drop(listener);
 
     let url = format!("ws://{address}/zyris/v1/ws");
-    let Err(failed) = zyris::transport::ws::connect(&url, "znt_fine").await else {
+    let Err(failed) = zyris::transport::ws::connect(&url, "zc_fine").await else {
         panic!("nothing is listening on that port")
     };
 

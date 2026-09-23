@@ -100,9 +100,10 @@ pub struct Hello {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     /// The name this connection asks to be known by — `myrepo`, `desktop`. The acceptor slugifies
-    /// it, takes the lowest free `-2`, `-3`… among the credential's live nodes, and answers with
-    /// the result in [`HelloAck::node`]. A deployment that names nodes may require it of anything
-    /// that is not a `cli` dialer; a `cli` dialer registers no node and its name is ignored.
+    /// it, takes the lowest free `-2`, `-3`… among the live nodes at the same `system/program`
+    /// path, across every credential with that program name, and answers with the result in
+    /// [`HelloAck::node`]. A deployment that names nodes may require it of anything that is not a
+    /// `cli` dialer; a `cli` dialer registers no node and its name is ignored.
     ///
     /// Optional on the wire so a peer built before this field keeps parsing.
     #[serde(default, skip_serializing_if = "Option::is_none")]

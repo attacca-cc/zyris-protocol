@@ -22,8 +22,9 @@ use crate::{EnrollError, TransportError};
 /// widen afterwards, so this is the one moment they can be chosen.
 #[derive(Debug, Clone)]
 pub struct EnrollRequest {
-    /// The program's own name — `zyris-code`. Fixed on the credential; a second approval of the
-    /// same program on the same system becomes `zyris-code-2`.
+    /// The program's own name — `zyris-code`. Fixed on the credential; names may repeat — a
+    /// second approval of the same program is a second credential with the same name, and their
+    /// nodes are told apart by the node suffix.
     pub program: String,
     /// What this machine calls itself (`zyris::machine_name()`), so the approval screen can
     /// preselect that system. A hint, never verified.
@@ -255,7 +256,7 @@ async fn authorize(
     Err(EnrollError::Unreachable(TransportError::Io(describe(&error_of(status, &body)))))
 }
 
-/// `{"error":"unknown_scope","scope":"nodes:write"}`. Anything else — a different refusal, an
+/// `{"error":"unknown_scope","scope":"made:up"}`. Anything else — a different refusal, an
 /// ingress's HTML — is not this, and must not be reported as if the caller could act on it.
 fn unknown_scope(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
@@ -641,13 +642,13 @@ mod tests {
         let url = scripted_responder(&[(
             "/device/authorize",
             "422 Unprocessable Entity",
-            r#"{"error":"unknown_scope","scope":"nodes:write"}"#,
+            r#"{"error":"unknown_scope","scope":"made:up"}"#,
         )]);
 
         let refusal = refusal_from(&url).await;
 
         match refusal {
-            EnrollError::ScopeUnknown { scope } => assert_eq!(scope, "nodes:write"),
+            EnrollError::ScopeUnknown { scope } => assert_eq!(scope, "made:up"),
             other => panic!("a caller cannot drop a scope it was not handed the name of: {other}"),
         }
     }

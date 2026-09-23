@@ -47,7 +47,7 @@ fn refusing_server(status_line: &'static str, body: &'static str) -> String {
 async fn a_credential_the_server_refuses_is_not_reported_as_a_network_problem() {
     let refusing = refusing_server("401 Unauthorized", r#"{"error":"unauthorized"}"#);
     let error = probe()
-        .dial(&refusing, "znt_wrong")
+        .dial(&refusing, "zc_wrong")
         .await
         .err()
         .expect("a 401 upgrade is not a connection");
@@ -61,7 +61,7 @@ async fn a_credential_the_server_refuses_is_not_reported_as_a_network_problem() 
 async fn a_server_having_a_bad_day_is_not_reported_as_a_dead_credential() {
     let flaky = refusing_server("503 Service Unavailable", r#"{"error":"unavailable"}"#);
     let error =
-        probe().dial(&flaky, "znt_fine").await.err().expect("a 503 upgrade is not a connection");
+        probe().dial(&flaky, "zc_fine").await.err().expect("a 503 upgrade is not a connection");
     assert!(
         matches!(error, ConnectError::Unreachable(_)),
         "a deploy must not be able to unenroll a fleet, got: {error}"
@@ -76,7 +76,7 @@ async fn a_server_having_a_bad_day_is_not_reported_as_a_dead_credential() {
 async fn a_refusal_before_the_protocol_was_spoken_leaves_the_peers_version_unstated() {
     let outdated = refusing_server("426 Upgrade Required", r#"{"error":"upgrade_required"}"#);
     let error =
-        probe().dial(&outdated, "znt_fine").await.err().expect("a 426 upgrade is not a connection");
+        probe().dial(&outdated, "zc_fine").await.err().expect("a 426 upgrade is not a connection");
     match error {
         ConnectError::VersionMismatch { ours, theirs } => {
             assert_eq!(
@@ -171,7 +171,7 @@ async fn a_token_the_server_refuses_never_becomes_a_link() {
         .unwrap();
 
     let error = node
-        .connect(&refusing, String::from("znt_wrong"))
+        .connect(&refusing, String::from("zc_wrong"))
         .await
         .err()
         .expect("a 401 upgrade is not a link");

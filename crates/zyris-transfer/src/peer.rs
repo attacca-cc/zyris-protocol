@@ -198,6 +198,9 @@ pub struct LocalPeerTransfer {
     /// Only filled in on the receiving side. The handle used to call back to the peer while
     /// handling a `push_offer`.
     peer: Arc<std::sync::OnceLock<PeerTransferClient>>,
+    /// The sender's node path (`system/program/node`), despite the field's name — kept as-is
+    /// because it flows straight into [`AuditLine::peer_slug`](crate::audit::AuditLine), a
+    /// serialized, on-disk format.
     peer_slug: String,
     /// What the sending side has reserved.
     pending: Arc<tokio::sync::Mutex<Vec<ToSend>>>,
@@ -205,6 +208,8 @@ pub struct LocalPeerTransfer {
 
 impl LocalPeerTransfer {
     /// The receiving side. The handle is plugged in later via `set_peer`.
+    ///
+    /// `peer_slug` is the sender's node path (`system/program/node`).
     pub fn receiver_pending(config: TransferConfig, peer_slug: String) -> LocalPeerTransfer {
         LocalPeerTransfer {
             config,

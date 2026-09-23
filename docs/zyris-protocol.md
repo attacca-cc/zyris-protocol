@@ -111,7 +111,7 @@ with the registry above.
 
 ```
 CLOSED ──dial──▶ AUTHENTICATING ──upgrade ok──▶ HELLO ──hello/hello_ack──▶ READY
-   ▲                   │ 4401                      │ unsupported_version → CLOSED (4400)
+   ▲                   │ HTTP 401                  │ unsupported_version → CLOSED (4400)
    │                   ▼                           │
    └────────────── CLOSED ◀── CLOSING ◀── zyris.closing / ws close / heartbeat timeout
         reconnect w/ resume_token within grace ⇒ presence continuity (§3.4)
@@ -119,15 +119,16 @@ CLOSED ──dial──▶ AUTHENTICATING ──upgrade ok──▶ HELLO ──
 
 ### 3.1 Auth
 
-The dialer sends `Authorization: Bearer <credential>` on the upgrade request. Auth failure closes
-the socket with websocket code `4401` before any Zyris frame. What a valid credential *looks like*
-is the deployment's choice; the wire only requires that it ride in that header.
+The dialer sends `Authorization: Bearer <credential>` on the upgrade request. Auth failure refuses
+the upgrade with HTTP `401` before either side has spoken the protocol — there is no websocket to
+close yet. What a valid credential *looks like* is the deployment's choice; the wire only requires
+that it ride in that header.
 
-The socket authenticates once at the upgrade and nothing re-checks it, so a deployment that supports
-revocation or credential expiry needs an in-band way to act on it. The recommended shape, and
-Attacca's: the periodic heartbeat also reports whether the node was revoked and when its newest
-credential expires, and the peer holding the socket closes it on either. Without that, revocation
-takes effect only on whichever replica happens to see the revoke call.
+The socket authenticates once at the upgrade and nothing re-checks it, so a deployment that
+revokes credentials mid-connection needs an in-band way to act on it, since a credential itself
+never expires. The recommended shape, and Attacca's: the periodic heartbeat also reports whether
+the node was revoked, and the peer holding the socket closes it with websocket code `4401` when it
+is. Without that, revocation takes effect only on whichever replica happens to see the revoke call.
 
 Attacca's scheme, as the worked example: one credential kind, a long-lived `zc_` credential issued
 to one (system, program) pair (§7), hashed at rest and carrying the scopes chosen when it was

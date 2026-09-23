@@ -117,7 +117,7 @@ anything else here.
 ### A larger node
 
 [`ridanit-ruma/zyris-hello`](https://github.com/ridanit-ruma/zyris-hello) is the reference for
-building a real one: it stores its credential and node token on disk, transfers files directly
+building a real one: it stores its credential on disk, transfers files directly
 between nodes, and announces `screen_capture` and `input` behind a feature so an agent can see a
 display and drive it. It used to live here as `crates/zyris-hello` and moved out with its history —
 this repository is a library, and a program belongs in one of its own.
