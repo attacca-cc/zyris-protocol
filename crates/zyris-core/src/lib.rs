@@ -49,8 +49,8 @@ pub use serve::{
 
 pub use zyris_proto as proto;
 pub use zyris_proto::{
-    AttachmentRef, AttachmentTrailer, Blob, CallLimit, CapabilityDescriptor, Chunk, Datum, Payload,
-    Serialization, ToolDescriptor, Transfer, WireError, INLINE_BLOB_MAX,
+    AttachmentRef, AttachmentTrailer, Blob, CallLimit, CapabilityDescriptor, Chunk, Datum,
+    NodeAddress, Payload, Serialization, ToolDescriptor, Transfer, WireError, INLINE_BLOB_MAX,
 };
 
 pub use async_trait::async_trait;

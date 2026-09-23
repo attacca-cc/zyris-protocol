@@ -12,7 +12,7 @@ use zyris_proto::{
     attach, decode_binary, decode_text, encode_control, encode_stream_data, method_name,
     split_method, AckProtocol, AnnounceParams, AnnounceResult, AttachmentRef, CapabilityDescriptor,
     AttachmentTrailer, ClosingParams, Envelope, ErrorCode, HeartbeatConfig, Hello, HelloAck, HelloProtocol,
-    IncomingFrame, Limits, Payload, RejectedCapability, Serialization, StreamDecl, WireError,
+    IncomingFrame, Limits, NodeAddress, Payload, RejectedCapability, Serialization, StreamDecl, WireError,
     WireMessage, CLOSE_NORMAL, CLOSE_UNSUPPORTED_VERSION, FEATURE_ATTACHMENTS, FEATURE_CANCEL,
     FEATURE_HEARTBEAT, INLINE_BLOB_MAX, METHOD_ANNOUNCE, METHOD_CLOSING, METHOD_HEARTBEAT,
     PROTOCOL_MAJOR, PROTOCOL_MINOR,
@@ -125,6 +125,10 @@ pub struct ConnectionInfo {
     /// an acceptor deciding how to treat a connection should not be reading it with a substring
     /// match.
     pub peer_kind: Option<String>,
+    /// Where this connection's node was put: from `HelloAck.node` on the dialing side, and what
+    /// this side assigned (`AcceptOptions::node`) on the accepting side. `None` for a `cli` dial
+    /// and for an acceptor that assigned nothing.
+    pub node: Option<NodeAddress>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -135,6 +139,9 @@ pub(crate) enum Side {
 
 pub struct AcceptOptions {
     pub node_id: String,
+    /// The address answered in `HelloAck.node`. `None` assigns nothing, which is what a `cli`
+    /// dialer and an acceptor that does not name nodes send.
+    pub node: Option<NodeAddress>,
     pub conn_id: String,
     pub resume_token: String,
     pub resumed: bool,
@@ -151,6 +158,7 @@ impl Default for AcceptOptions {
     fn default() -> Self {
         AcceptOptions {
             node_id: uuid::Uuid::new_v4().simple().to_string(),
+            node: None,
             conn_id: uuid::Uuid::new_v4().simple().to_string(),
             resume_token: uuid::Uuid::new_v4().simple().to_string(),
             resumed: false,
@@ -647,7 +655,7 @@ impl Features {
 }
 
 pub(crate) enum Role {
-    Dial { agent: String, kind: String },
+    Dial { agent: String, kind: String, name: String },
     Accept { options: AcceptOptions },
 }
 
@@ -659,7 +667,7 @@ pub(crate) async fn establish(
     let (mut sink, mut stream) = transport.split();
 
     let (serialization, limits, info, reserved, features, heartbeat) = match role {
-        Role::Dial { agent, kind } => {
+        Role::Dial { agent, kind, name } => {
             let local = vec![
                 FEATURE_CANCEL.to_string(),
                 FEATURE_ATTACHMENTS.to_string(),
@@ -670,7 +678,7 @@ pub(crate) async fn establish(
                 serialization: vec![Serialization::Msgpack, Serialization::Json],
                 agent,
                 kind: Some(kind),
-                node_name: None,
+                node_name: Some(name),
                 features: local.clone(),
                 resume: None,
             });
@@ -705,6 +713,7 @@ pub(crate) async fn establish(
                 serialization: ack.serialization,
                 peer_agent: None,
                 peer_kind: None,
+                node: ack.node.clone(),
             };
             (
                 ack.serialization,
@@ -748,7 +757,7 @@ pub(crate) async fn establish(
                 conn_id: options.conn_id.clone(),
                 resume_token: options.resume_token.clone(),
                 node_id: options.node_id.clone(),
-                node: None,
+                node: options.node.clone(),
                 heartbeat: options.heartbeat,
                 limits: options.limits,
                 resumed: options.resumed,
@@ -763,6 +772,7 @@ pub(crate) async fn establish(
                 serialization,
                 peer_agent: Some(hello.agent),
                 peer_kind: hello.kind,
+                node: options.node,
             };
             (
                 serialization,

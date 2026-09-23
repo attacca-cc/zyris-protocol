@@ -92,7 +92,11 @@ impl Node {
     pub async fn connect_over(&self, transport: impl Transport) -> Result<Connection> {
         establish(
             Box::new(transport),
-            Role::Dial { agent: self.agent(), kind: self.kind.as_str().to_string() },
+            Role::Dial {
+                agent: self.agent(),
+                kind: self.kind.as_str().to_string(),
+                name: self.name.clone(),
+            },
             self.capabilities.clone(),
         )
         .await
