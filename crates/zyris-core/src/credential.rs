@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped only on an incompatible change. `1` was the `zna_`/`znr_` account credential, which no
 /// server honours any more.
+///
+/// Only read by `enroll::device` (behind the `enroll` feature) and this module's own tests — gated
+/// the same way so a plain build never carries a `never used` warning for it.
+#[cfg(any(feature = "enroll", test))]
 pub(crate) const CREDENTIAL_VERSION: u32 = 2;
 
 /// Something the server keeps a name for: its id, the name a person gave it, and the slug that
@@ -25,7 +29,7 @@ pub struct Named {
 }
 
 /// A long-lived `zc_` bearer, issued to one program on one system.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Credential {
     pub version: u32,
     /// `zc_…`. What `Node::connect` presents.
@@ -47,6 +51,29 @@ impl Credential {
     pub fn secret(&self) -> &str {
         &self.secret
     }
+}
+
+/// Hand-written rather than derived: a `zc_` never expires, so a `Debug` printed to a log by
+/// accident — `tracing::debug!(?credential)`, an `unwrap_err` in a test failure — must not be the
+/// whole bearer. Every other field is worth seeing whole; only `secret` is redacted.
+impl std::fmt::Debug for Credential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Credential")
+            .field("version", &self.version)
+            .field("secret", &redacted(&self.secret))
+            .field("system", &self.system)
+            .field("program", &self.program)
+            .field("scopes", &self.scopes)
+            .field("owner_email", &self.owner_email)
+            .finish()
+    }
+}
+
+/// The first three bytes plus an ellipsis — enough to recognise which credential this was
+/// (`zc_` is the only prefix that ships) without printing anything a reader could dial with.
+fn redacted(secret: &str) -> String {
+    let prefix: String = secret.chars().take(3).collect();
+    format!("{prefix}…")
 }
 
 #[cfg(test)]
@@ -81,6 +108,24 @@ mod tests {
     fn an_account_credential_from_before_is_not_read_as_one() {
         let old = r#"{"version":1,"access_token":"zna_old","refresh_token":"znr_old",
             "node_id":"n","node_name":"laptop","owner_email":"a@example.com","access_expires_at":1}"#;
-        assert!(serde_json::from_str::<Credential>(old).is_err());
+        let error = serde_json::from_str::<Credential>(old).expect_err("the old shape must not parse");
+        assert!(
+            error.to_string().contains("missing field"),
+            "has to fail because a field is missing, not for some other reason, got: {error}"
+        );
+    }
+
+    /// A `zc_` never expires, so a `Debug` a caller logs by accident must not be the whole story —
+    /// only enough to tell which credential it was.
+    #[test]
+    fn debug_redacts_the_secret_but_names_who_it_is() {
+        let printed = format!("{:?}", laptop());
+        assert!(
+            !printed.contains("zc_kept_by_the_caller"),
+            "the full secret must never land in a Debug print, got: {printed}"
+        );
+        assert!(printed.contains("zc_…"), "a truncated hint is fine, got: {printed}");
+        assert!(printed.contains("Laptop"), "the system name has to survive, got: {printed}");
+        assert!(printed.contains("zyris-code"), "the program name has to survive, got: {printed}");
     }
 }

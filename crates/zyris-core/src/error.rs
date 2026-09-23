@@ -56,8 +56,8 @@ pub enum ConnectError {
     /// can reach will change this answer.
     #[error("this credential was revoked; a person must authorize this node again")]
     Revoked,
-    /// The token was judged and refused — a typo, a paste that lost a character, a `zna_` where a
-    /// `znt_` belongs.
+    /// The token was judged and refused — a `zc_` that was mistyped, revoked, or never issued, or
+    /// a token from before credentials existed.
     #[error("the server did not accept this token")]
     Unauthorized,
     /// Negotiation failed. Retrying gets the same answer; a different build does not.
