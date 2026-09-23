@@ -15,7 +15,7 @@
 //! let node = Node::builder().name("my node").kind(NodeKind::Service).build()?;
 //!
 //! // `connect` keeps the link up across drops; `Node::dial` is the single attempt underneath it.
-//! let link = node.connect("wss://attacca.cc/api/zyris/v1/ws", "znt_the_node_token").await?;
+//! let link = node.connect("wss://attacca.cc/api/zyris/v1/ws", "zc_the_credential").await?;
 //! link.wait_closed().await?;
 //! # Ok(())
 //! # }
@@ -49,12 +49,11 @@
 //! `p2p` reaches a provider too, through iroh — that one is a property of wanting QUIC rather than
 //! something this crate decided.
 //!
-//! That is the half a node does on every start. The other half — enrolling once, keeping the
-//! account credential, and minting a node token from it — is spelled out end to end on
-//! `zyris::enroll`, behind the `enroll` feature (so it is not a link here: under default
-//! features that item does not exist). Capability declarations live in `zyris::caps`, behind
-//! `caps`; what a node *implements* is the node's own decision, which is why nothing published
-//! here makes it.
+//! That is the half a node does on every start. The other half — enrolling once and keeping the
+//! `Credential` it issues — is spelled out end to end on `zyris::enroll`, behind the `enroll`
+//! feature (so it is not a link here: under default features that item does not exist).
+//! Capability declarations live in `zyris::caps`, behind `caps`; what a node *implements* is the
+//! node's own decision, which is why nothing published here makes it.
 //!
 //! Implementations of those declarations are not here on purpose: what a node offers is the
 //! node's decision. Reference ones are separate crates, added beside this one as you want them —
@@ -65,7 +64,7 @@
 //! # What is where
 //!
 //! The runtime — connection state machine, transports, capability announce and accept, the
-//! dial/reconnect loop, device-grant enrollment, the account layer — is re-exported at this
+//! dial/reconnect loop, device-grant enrollment and the credential it issues — is re-exported at this
 //! crate's root, so `Node`, `Connection`, `Result` and everything beside them are named
 //! directly. The layers above the runtime each get a module, and each is behind a feature:
 //!

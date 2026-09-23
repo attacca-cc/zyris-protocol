@@ -19,10 +19,10 @@ catalogue or an implementation of one — or when you want the runtime and nothi
 - `client` *(default)* — the websocket dialer, `Node::connect`, and the reconnect loop behind
   `Link`.
 - `hostname` *(default)* — name the node after the machine it runs on.
-- `enroll` — self-registration over the device grant, and the `Account` layer that mints node
-  tokens from what it issues. **Turns on `tls-ring`**: it is an HTTPS flow, and `reqwest` on
-  `rustls-no-provider` panics while building its client rather than on a request, so leaving
-  the choice open would move a panic somewhere with even less context than a dial. Where the credential is stored is the caller's decision, not this
+- `enroll` — self-registration over the device grant, ending in a serde `Credential`. **Turns on
+  `tls-ring`**: it is an HTTPS flow, and `reqwest` on `rustls-no-provider` panics while building
+  its client rather than on a request, so leaving the choice open would move a panic somewhere with
+  even less context than a dial. Where the credential is stored is the caller's decision, not this
   crate's: it is handed back as a value and taken back as one.
 - `tls-ring` / `tls-aws-lc` — the TLS provider rustls negotiates `wss://` with. Exactly one, and
   neither is default: both compile C (`ring` wants `cc`, `aws-lc-rs` wants `cmake` too off its
