@@ -13,11 +13,11 @@ pub use capability::{
 };
 pub use datum::{AttachmentRef, Blob, Chunk, Datum, INLINE_BLOB_MAX};
 pub use envelope::{
-    AckProtocol, Envelope, HeartbeatConfig, Hello, HelloAck, HelloProtocol, Limits, ResumeInfo,
-    Serialization, StreamDecl, CLOSE_FLOW_VIOLATION, CLOSE_MALFORMED_FRAME, CLOSE_NORMAL,
-    CLOSE_UNAUTHORIZED, CLOSE_UNSUPPORTED_VERSION, FEATURE_ATTACHMENTS, FEATURE_CANCEL,
-    FEATURE_HEARTBEAT, METHOD_ANNOUNCE, METHOD_CLOSING, METHOD_HEARTBEAT, METHOD_WEBRTC_CLOSE,
-    METHOD_WEBRTC_SIGNAL, PROTOCOL_MAJOR, PROTOCOL_MINOR,
+    AckProtocol, Envelope, HeartbeatConfig, Hello, HelloAck, HelloProtocol, Limits, NodeAddress,
+    ResumeInfo, Serialization, StreamDecl, CLOSE_FLOW_VIOLATION, CLOSE_MALFORMED_FRAME,
+    CLOSE_NORMAL, CLOSE_UNAUTHORIZED, CLOSE_UNSUPPORTED_VERSION, FEATURE_ATTACHMENTS,
+    FEATURE_CANCEL, FEATURE_HEARTBEAT, METHOD_ANNOUNCE, METHOD_CLOSING, METHOD_HEARTBEAT,
+    METHOD_WEBRTC_CLOSE, METHOD_WEBRTC_SIGNAL, PROTOCOL_MAJOR, PROTOCOL_MINOR,
 };
 pub use error::{ErrorCode, WireError};
 pub use frame::{
@@ -123,6 +123,7 @@ mod tests {
             serialization: vec![Serialization::Json],
             agent: "zyris-test/0.1".into(),
             kind: None,
+            node_name: None,
             features: vec![],
             resume: None,
         });
@@ -139,6 +140,7 @@ mod tests {
             serialization: vec![Serialization::Msgpack, Serialization::Json],
             agent: "zyris-test/0.1".into(),
             kind: Some("cli".into()),
+            node_name: None,
             features: vec!["cancel".into()],
             resume: None,
         }));
@@ -148,11 +150,116 @@ mod tests {
             conn_id: "c1".into(),
             resume_token: "tok".into(),
             node_id: "n1".into(),
+            node: None,
             heartbeat: HeartbeatConfig::default(),
             limits: Limits::default(),
             resumed: false,
             features: vec![FEATURE_ATTACHMENTS.into()],
         }));
+    }
+
+    /// Both new handshake fields survive msgpack and JSON, and each is absent from the wire when
+    /// unset — so a peer that does not set one costs no bytes and reads the same to an old peer.
+    #[test]
+    fn node_name_and_node_address_round_trip_and_vanish_when_unset() {
+        roundtrip(Envelope::Hello(Hello {
+            protocol: HelloProtocol { major: 1, minors_supported: vec![0] },
+            serialization: vec![Serialization::Msgpack],
+            agent: "zyris-test/0.1".into(),
+            kind: Some("service".into()),
+            node_name: Some("myrepo".into()),
+            features: vec![],
+            resume: None,
+        }));
+        roundtrip(Envelope::HelloAck(HelloAck {
+            protocol: AckProtocol { major: 1, minor: 0 },
+            serialization: Serialization::Msgpack,
+            conn_id: "c1".into(),
+            resume_token: "tok".into(),
+            node_id: "n1".into(),
+            node: Some(NodeAddress {
+                system: "laptop".into(),
+                program: "zyris-code".into(),
+                name: "myrepo-2".into(),
+            }),
+            heartbeat: HeartbeatConfig::default(),
+            limits: Limits::default(),
+            resumed: false,
+            features: vec![],
+        }));
+
+        let bare = Envelope::HelloAck(HelloAck {
+            protocol: AckProtocol { major: 1, minor: 0 },
+            serialization: Serialization::Json,
+            conn_id: "c1".into(),
+            resume_token: "tok".into(),
+            node_id: "n1".into(),
+            node: None,
+            heartbeat: HeartbeatConfig::default(),
+            limits: Limits::default(),
+            resumed: false,
+            features: vec![],
+        });
+        let WireMessage::Text(text) = encode_control(&bare, Serialization::Json).unwrap() else {
+            panic!("expected text")
+        };
+        assert!(!text.contains("\"node\":"), "an unset node puts nothing on the wire: {text}");
+
+        let hello = Envelope::Hello(Hello {
+            protocol: HelloProtocol { major: 1, minors_supported: vec![0] },
+            serialization: vec![Serialization::Json],
+            agent: "zyris-test/0.1".into(),
+            kind: Some("cli".into()),
+            node_name: None,
+            features: vec![],
+            resume: None,
+        });
+        let WireMessage::Text(text) = encode_control(&hello, Serialization::Json).unwrap() else {
+            panic!("expected text")
+        };
+        assert!(!text.contains("node_name"), "an unset name puts nothing on the wire: {text}");
+    }
+
+    /// An acceptor built before `HelloAck::node` sends no such field, and its ack has to keep
+    /// parsing — as "assigned nothing", not as an error.
+    #[test]
+    fn a_hello_ack_from_before_the_node_field_still_parses() {
+        let older = r#"{"t":"hello_ack","protocol":{"major":1,"minor":0},"serialization":"msgpack",
+            "conn_id":"c1","resume_token":"tok","node_id":"n1",
+            "heartbeat":{"interval_s":20,"timeout_s":45},
+            "limits":{"max_control_frame":1,"max_chunk":1,"max_inflight_reqs":1,"initial_stream_credit":1},
+            "resumed":false,"features":[]}"#;
+        let Envelope::HelloAck(ack) = decode_text(older).expect("an older ack must parse") else {
+            panic!("expected a hello_ack")
+        };
+        assert_eq!(ack.node, None);
+    }
+
+    /// A path is how a caller names a node (`peer_lookup`, tool arguments), so a malformed one must
+    /// never come back as a partial address.
+    #[test]
+    fn a_node_path_parses_back_and_nothing_malformed_does() {
+        let address = NodeAddress {
+            system: "laptop".into(),
+            program: "zyris-code".into(),
+            name: "myrepo-2".into(),
+        };
+        assert_eq!(address.path(), "laptop/zyris-code/myrepo-2");
+        assert_eq!(address.to_string(), address.path());
+        assert_eq!(NodeAddress::parse(&address.path()), Some(address));
+
+        for bad in [
+            "",
+            "laptop",
+            "laptop/zyris-code",
+            "laptop/zyris-code/myrepo/extra",
+            "laptop//myrepo",
+            "/zyris-code/myrepo",
+            "laptop/zyris-code/",
+            "//",
+        ] {
+            assert_eq!(NodeAddress::parse(bad), None, "{bad:?} is not a node path");
+        }
     }
 
     #[test]

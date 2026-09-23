@@ -122,6 +122,7 @@ async fn a_peer_that_answered_the_handshake_has_its_major_named_in_the_mismatch(
             conn_id: "c1".to_string(),
             resume_token: String::new(),
             node_id: "n1".to_string(),
+            node: None,
             heartbeat: Default::default(),
             limits: Default::default(),
             resumed: false,

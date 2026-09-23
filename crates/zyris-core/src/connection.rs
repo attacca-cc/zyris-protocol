@@ -670,6 +670,7 @@ pub(crate) async fn establish(
                 serialization: vec![Serialization::Msgpack, Serialization::Json],
                 agent,
                 kind: Some(kind),
+                node_name: None,
                 features: local.clone(),
                 resume: None,
             });
@@ -747,6 +748,7 @@ pub(crate) async fn establish(
                 conn_id: options.conn_id.clone(),
                 resume_token: options.resume_token.clone(),
                 node_id: options.node_id.clone(),
+                node: None,
                 heartbeat: options.heartbeat,
                 limits: options.limits,
                 resumed: options.resumed,
