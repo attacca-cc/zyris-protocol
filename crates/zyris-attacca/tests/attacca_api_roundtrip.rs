@@ -7,11 +7,11 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use zyris::{Datum, Node, NodeKind, Streaming, Transfer};
 use zyris_attacca::{
-    attacca_api_capability, AttaccaApi, AttaccaApiClient, AttaccaApiServer, ZAgent, ZDeltaKind,
-    ZHistoryQuery, ZJob, ZJobFilter, ZJobState, ZJobUpdate, ZMe, ZNewAgent, ZNewJob,
-    ZNewProject, ZNewSession, ZNewWork, ZPeerAddr, ZPeerEntry, ZProject, ZProjectUpdate,
-    ZScope, ZSession, ZSessionEvent, ZSessionFilter, ZTask, ZTaskDep, ZTaskState, ZTurnFrame,
-    ZTurnStatus, ZUsage, ZWork, ZWorkFilter, ZWorkState, ZWorkTasks, ZWorkUpdate,
+    attacca_api_capability, AttaccaApi, AttaccaApiClient, AttaccaApiPeerLookupRequest,
+    AttaccaApiServer, ZAgent, ZDeltaKind, ZHistoryQuery, ZJob, ZJobFilter, ZJobState, ZJobUpdate,
+    ZMe, ZNewAgent, ZNewJob, ZNewProject, ZNewSession, ZNewWork, ZPeerAddr, ZPeerEntry, ZProject,
+    ZProjectUpdate, ZScope, ZSession, ZSessionEvent, ZSessionFilter, ZTask, ZTaskDep, ZTaskState,
+    ZTurnFrame, ZTurnStatus, ZUsage, ZWork, ZWorkFilter, ZWorkState, ZWorkTasks, ZWorkUpdate,
     ATTACCA_API_CAPABILITY,
 };
 
@@ -891,6 +891,19 @@ async fn peer_rendezvous_tools_round_trip() {
     assert_eq!(peers.len(), 1);
     assert_eq!(peers[0].path, "laptop/zyris-code/myrepo");
     assert_eq!(peers[0].endpoint_id, "ed25519:sibling-endpoint");
+}
+
+/// The request key changed from `slug` to `path` when the lookup moved to a full node path. A
+/// server still reading `slug` off the wire would find nothing and refuse every lookup, so this
+/// pins the generated request's serialized shape directly rather than trusting the round trip
+/// above to notice a stale key on both ends at once.
+#[test]
+fn peer_lookup_request_serializes_with_a_path_key_not_slug() {
+    let request = AttaccaApiPeerLookupRequest { path: "laptop/zyris-code/myrepo".into() };
+    assert_eq!(
+        serde_json::to_value(&request).unwrap(),
+        serde_json::json!({"path": "laptop/zyris-code/myrepo"})
+    );
 }
 
 /// `ZPeerAddr` is exchanged between two independently-deployed systems, so its optionality is a
