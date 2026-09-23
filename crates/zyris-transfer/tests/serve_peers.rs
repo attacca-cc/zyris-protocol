@@ -37,10 +37,10 @@ impl PeerDirectory for Directory {
     }
 }
 
-fn entry(slug: &str, endpoint_id: &str) -> ZPeerEntry {
+fn entry(path: &str, endpoint_id: &str) -> ZPeerEntry {
     ZPeerEntry {
-        node_id: format!("node-{slug}"),
-        slug: slug.to_string(),
+        node_id: format!("node-{path}"),
+        path: path.to_string(),
         endpoint_id: endpoint_id.to_string(),
         online: true,
     }

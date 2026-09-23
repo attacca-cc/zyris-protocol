@@ -8,8 +8,8 @@ use futures_util::StreamExt;
 use zyris::{Datum, Node, NodeKind, Streaming, Transfer};
 use zyris_attacca::{
     attacca_api_capability, AttaccaApi, AttaccaApiClient, AttaccaApiServer, ZAgent, ZDeltaKind,
-    ZHistoryQuery, ZJob, ZJobFilter, ZJobState, ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewNode,
-    ZNewProject, ZNewSession, ZNewWork, ZNode, ZPeerAddr, ZPeerEntry, ZProject, ZProjectUpdate,
+    ZHistoryQuery, ZJob, ZJobFilter, ZJobState, ZJobUpdate, ZMe, ZNewAgent, ZNewJob,
+    ZNewProject, ZNewSession, ZNewWork, ZPeerAddr, ZPeerEntry, ZProject, ZProjectUpdate,
     ZScope, ZSession, ZSessionEvent, ZSessionFilter, ZTask, ZTaskDep, ZTaskState, ZTurnFrame,
     ZTurnStatus, ZUsage, ZWork, ZWorkFilter, ZWorkState, ZWorkTasks, ZWorkUpdate,
     ATTACCA_API_CAPABILITY,
@@ -389,53 +389,16 @@ impl AttaccaApi for StubApi {
         Ok(Streaming::new(head, futures_util::stream::iter(frames)))
     }
 
-    async fn register_node(&self, request: ZNewNode) -> zyris::Result<ZNode> {
-        Ok(ZNode {
-            node_id: "sibling-1".into(),
-            name: request.name,
-            slug: "sibling-1".into(),
-            platform: request.platform.unwrap_or_else(|| "linux".into()),
-            scopes: request.scopes,
-            connected: false,
-            token: Some("znt_sibling-one-time".into()),
-            last_seen_at: None,
-            created_at: Some("2026-08-03T00:00:00Z".into()),
-        })
-    }
-
-    async fn list_nodes(&self) -> zyris::Result<Vec<ZNode>> {
-        Ok(vec![ZNode {
-            node_id: "sibling-1".into(),
-            name: "coder-a".into(),
-            slug: "sibling-1".into(),
-            platform: "linux".into(),
-            scopes: vec![],
-            connected: true,
-            token: None,
-            last_seen_at: Some("2026-08-03T00:00:01Z".into()),
-            created_at: Some("2026-08-03T00:00:00Z".into()),
-        }])
-    }
-
-    /// Refuses to delete the caller, the way the doc on the trait says a server must. This stub
-    /// knows itself as `self`, having no connection to read an identity from.
-    async fn delete_node(&self, node_id: String) -> zyris::Result<()> {
-        if node_id == "self" {
-            return Err(zyris::WireError::invalid_params("a node cannot delete itself").into());
-        }
-        Ok(())
-    }
-
     async fn peer_publish(&self, _endpoint_id: String, _addrs: Vec<String>) -> zyris::Result<()> {
         Ok(())
     }
 
-    /// Echoes the requested slug back on the answer, which is what a node calling this with the
-    /// name a user typed should get: the same name it asked with, not one the server substituted.
-    async fn peer_lookup(&self, slug: String) -> zyris::Result<ZPeerAddr> {
+    /// Echoes the requested path back on the answer, which is what a node calling this with the
+    /// path a user named should get: the same path it asked with, not one the server substituted.
+    async fn peer_lookup(&self, path: String) -> zyris::Result<ZPeerAddr> {
         Ok(ZPeerAddr {
             node_id: "sibling-1".into(),
-            slug,
+            path,
             endpoint_id: "ed25519:sibling-endpoint".into(),
             addrs: vec!["203.0.113.5:4433".into()],
             relay_url: Some("https://relay.attacca.cc".into()),
@@ -446,7 +409,7 @@ impl AttaccaApi for StubApi {
     async fn peer_list(&self) -> zyris::Result<Vec<ZPeerEntry>> {
         Ok(vec![ZPeerEntry {
             node_id: "sibling-1".into(),
-            slug: "laptop".into(),
+            path: "laptop/zyris-code/myrepo".into(),
             endpoint_id: "ed25519:sibling-endpoint".into(),
             online: true,
         }])
@@ -473,7 +436,12 @@ fn descriptor_matches_the_reserved_name() {
     let descriptor = attacca_api_capability();
     assert_eq!(descriptor.name, ATTACCA_API_CAPABILITY);
     assert_eq!(descriptor.version, 1);
-    assert_eq!(descriptor.tools.len(), 38);
+    assert_eq!(descriptor.tools.len(), 35);
+    // A credential exists to create nodes, so nothing on this surface registers, lists or deletes
+    // one any more. A deployment still serving these would be one this crate cannot call.
+    for gone in ["register_node", "list_nodes", "delete_node"] {
+        assert!(descriptor.tool(gone).is_none(), "{gone} is still declared");
+    }
     assert_eq!(descriptor.tool("list_agents").unwrap().transfer, Transfer::Unary);
     assert_eq!(descriptor.tool("me").unwrap().transfer, Transfer::Unary);
     assert_eq!(descriptor.tool("list_projects").unwrap().transfer, Transfer::Unary);
@@ -884,52 +852,13 @@ async fn works_scopes_are_spelled_the_way_the_wire_spells_them() {
     assert!(ZScope::ALL.contains(&ZScope::WorksWrite));
 }
 
-/// A sibling node: registered under the caller's device, listed without its one-time token. The
-/// token is the only thing that must never survive a round trip into a listing.
-#[tokio::test]
-async fn sibling_nodes_round_trip() {
-    let api = client().await;
-
-    let created = api
-        .register_node(ZNewNode {
-            name: "coder-a".into(),
-            platform: Some("linux".into()),
-            scopes: vec!["sessions:write".into()],
-        })
-        .await
-        .unwrap();
-    assert_eq!(created.node_id, "sibling-1");
-    assert_eq!(created.platform, "linux");
-    assert_eq!(created.scopes, vec!["sessions:write".to_string()]);
-    assert!(created.token.is_some(), "the register response is the one chance to see the token");
-
-    let listed = api.list_nodes().await.unwrap();
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].node_id, "sibling-1");
-    assert!(listed[0].token.is_none(), "the one-time token must never come back in a listing");
-}
-
-/// **Registering without deleting is a one-way door.** A client that registers a node per window
-/// has to be able to take one back, or it can only ever add to an account it cannot tidy. The
-/// refusal is half of the contract: a node that deleted itself would have to answer down the
-/// connection it just revoked, so the caller could never tell "done" from "the socket died."
-#[tokio::test]
-async fn a_sibling_node_can_be_deleted_but_never_itself() {
-    let api = client().await;
-
-    api.delete_node("sibling-1".into()).await.expect("a sibling comes back off the account");
-
-    let err = api.delete_node("self".into()).await.expect_err("deleting the caller is refused");
-    assert!(err.to_string().contains("cannot delete itself"), "{err}");
-}
-
-/// The scope added alongside the sibling-node tools. `ZScope::ALL` is what a node asks for when it
-/// wants everything, so a scope missing from it is a scope no node ever requests.
-#[tokio::test]
-async fn sibling_node_scope_is_spelled_the_way_the_wire_spells_it() {
-    assert_eq!(ZScope::NodesWrite.as_str(), "nodes:write");
-    assert_eq!(ZScope::from_str("nodes:write"), Some(ZScope::NodesWrite));
-    assert!(ZScope::ALL.contains(&ZScope::NodesWrite));
+/// There is no scope for creating nodes: that is what a credential is for. `ZScope::ALL` is what a
+/// node asks for when it wants everything, and a deployment that no longer knows `nodes:write`
+/// refuses that whole request by name — so a scope left in here breaks every such enrollment.
+#[test]
+fn there_is_no_scope_for_creating_nodes() {
+    assert_eq!(ZScope::from_str("nodes:write"), None);
+    assert!(ZScope::ALL.iter().all(|scope| scope.as_str() != "nodes:write"));
 }
 
 /// The scope guarding the three rendezvous tools.
@@ -942,24 +871,25 @@ fn peers_write_scope_exists() {
     assert!(ZScope::ALL.contains(&ZScope::PeersWrite));
 }
 
-/// The lookup key is the slug, not `node_id`: this is what a node calling `peer_lookup("laptop")`
-/// gets back, and it must be the same name it asked with rather than one the server minted, since
-/// that name is what TOFU pinning in `zyris-p2p` keys on.
+/// The lookup key is the node path, not `node_id`: this is what a node calling
+/// `peer_lookup("laptop/zyris-code/myrepo")` gets back, and it must be the same path it asked with
+/// rather than one the server minted, since what the caller said is what TOFU pinning in
+/// `zyris-p2p` keys on.
 #[tokio::test]
 async fn peer_rendezvous_tools_round_trip() {
     let api = client().await;
 
     api.peer_publish("ed25519:my-endpoint".into(), vec!["198.51.100.9:4433".into()]).await.unwrap();
 
-    let addr = api.peer_lookup("laptop".into()).await.unwrap();
-    assert_eq!(addr.slug, "laptop", "peer_lookup must answer under the slug it was asked for");
+    let addr = api.peer_lookup("laptop/zyris-code/myrepo".into()).await.unwrap();
+    assert_eq!(addr.path, "laptop/zyris-code/myrepo", "answered under the path it was asked for");
     assert_eq!(addr.node_id, "sibling-1");
     assert!(!addr.addrs.is_empty());
     assert!(addr.online);
 
     let peers = api.peer_list().await.unwrap();
     assert_eq!(peers.len(), 1);
-    assert_eq!(peers[0].slug, "laptop");
+    assert_eq!(peers[0].path, "laptop/zyris-code/myrepo");
     assert_eq!(peers[0].endpoint_id, "ed25519:sibling-endpoint");
 }
 
@@ -970,7 +900,7 @@ async fn peer_rendezvous_tools_round_trip() {
 fn peer_addr_optional_fields_default_when_absent() {
     let missing_both = serde_json::json!({
         "node_id": "sibling-1",
-        "slug": "laptop",
+        "path": "laptop/zyris-code/myrepo",
         "endpoint_id": "ed25519:sibling-endpoint",
         "online": true,
     });
@@ -982,7 +912,7 @@ fn peer_addr_optional_fields_default_when_absent() {
     // rather than both happening to pass only when both are absent together.
     let missing_relay_only = serde_json::json!({
         "node_id": "sibling-1",
-        "slug": "laptop",
+        "path": "laptop/zyris-code/myrepo",
         "endpoint_id": "ed25519:sibling-endpoint",
         "addrs": ["203.0.113.5:4433"],
         "online": true,
@@ -999,7 +929,7 @@ fn peer_addr_optional_fields_default_when_absent() {
 fn peer_addr_relay_url_is_omitted_not_null_when_unset() {
     let addr = ZPeerAddr {
         node_id: "sibling-1".into(),
-        slug: "laptop".into(),
+        path: "laptop/zyris-code/myrepo".into(),
         endpoint_id: "ed25519:sibling-endpoint".into(),
         addrs: vec![],
         relay_url: None,
@@ -1013,13 +943,22 @@ fn peer_addr_relay_url_is_omitted_not_null_when_unset() {
 }
 
 /// `ZPeerEntry` has no optional fields — unlike `ZPeerAddr`, every one of these is required, and a
-/// deployment that omits one must fail to decode rather than silently default it away.
+/// deployment that omits one must fail to decode rather than silently default it away. A
+/// deployment still sending the old `slug` is one of those.
 #[test]
 fn peer_entry_rejects_a_missing_required_field() {
     let missing_endpoint_id = serde_json::json!({
         "node_id": "sibling-1",
-        "slug": "laptop",
+        "path": "laptop/zyris-code/myrepo",
         "online": true,
     });
     assert!(serde_json::from_value::<ZPeerEntry>(missing_endpoint_id).is_err());
+
+    let still_a_slug = serde_json::json!({
+        "node_id": "sibling-1",
+        "slug": "laptop",
+        "endpoint_id": "ed25519:sibling-endpoint",
+        "online": true,
+    });
+    assert!(serde_json::from_value::<ZPeerEntry>(still_a_slug).is_err());
 }

@@ -19,7 +19,7 @@ use std::time::Duration;
 use zyris::{Chunk, Datum, ErrorCode, Node, NodeKind, Result, Streaming, WireError};
 use zyris_attacca::{
     AttaccaApi, AttaccaApiClient, AttaccaApiServer, ZAgent, ZHistoryQuery, ZJob, ZJobFilter,
-    ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewNode, ZNewProject, ZNewSession, ZNewWork, ZNode,
+    ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewProject, ZNewSession, ZNewWork,
     ZPeerAddr, ZPeerEntry, ZProject, ZProjectUpdate, ZSession, ZSessionEvent, ZSessionFilter,
     ZTurnFrame, ZTurnStatus, ZUsage, ZWork, ZWorkFilter, ZWorkTasks, ZWorkUpdate,
 };
@@ -37,7 +37,7 @@ use zyris_p2p::tofu::TofuStore;
 // The rendezvous stub
 // ---------------------------------------------------------------------------------------------
 
-/// Everything `send_to` asks the rendezvous, and nothing else. The 36 other tools on
+/// Everything `send_to` asks the rendezvous, and nothing else. The other tools on
 /// `attacca_api` have to be present for the trait to be implemented, but a test that reached one
 /// of them would be testing something this file does not claim to cover — so they answer with an
 /// error that says exactly that rather than a plausible-looking stub value.
@@ -51,7 +51,7 @@ fn unused<T>() -> Result<T> {
 
 #[async_trait::async_trait]
 impl AttaccaApi for StubRendezvous {
-    async fn peer_lookup(&self, _slug: String) -> Result<ZPeerAddr> {
+    async fn peer_lookup(&self, _path: String) -> Result<ZPeerAddr> {
         self.answer.clone()
     }
 
@@ -162,15 +162,6 @@ impl AttaccaApi for StubRendezvous {
         _session_id: String,
         _after: Option<i64>,
     ) -> Result<Streaming<ZTurnStatus, ZTurnFrame>> {
-        unused()
-    }
-    async fn register_node(&self, _request: ZNewNode) -> Result<ZNode> {
-        unused()
-    }
-    async fn list_nodes(&self) -> Result<Vec<ZNode>> {
-        unused()
-    }
-    async fn delete_node(&self, _node_id: String) -> Result<()> {
         unused()
     }
     async fn peer_publish(&self, _endpoint_id: String, _addrs: Vec<String>) -> Result<()> {
@@ -287,10 +278,10 @@ fn endpoint_id(seed: u8) -> String {
     iroh::SecretKey::from_bytes(&[seed; 32]).public().to_string()
 }
 
-fn peer(slug: &str, seed: u8) -> ZPeerAddr {
+fn peer(path: &str, seed: u8) -> ZPeerAddr {
     ZPeerAddr {
-        node_id: format!("node-{slug}"),
-        slug: slug.to_string(),
+        node_id: format!("node-{path}"),
+        path: path.to_string(),
         endpoint_id: endpoint_id(seed),
         addrs: Vec::new(),
         relay_url: None,
@@ -870,7 +861,7 @@ async fn the_iroh_link_carries_a_real_transfer() {
             },
             rendezvous(Ok(ZPeerAddr {
                 node_id: "node-laptop".to_string(),
-                slug: "laptop".to_string(),
+                path: "laptop".to_string(),
                 endpoint_id: receiving_id,
                 addrs,
                 relay_url: None,
@@ -1005,7 +996,7 @@ async fn a_transfer_completes_when_only_a_relay_can_carry_it() {
             },
             rendezvous(Ok(ZPeerAddr {
                 node_id: "node-laptop".to_string(),
-                slug: "laptop".to_string(),
+                path: "laptop".to_string(),
                 endpoint_id: receiving_id,
                 addrs: Vec::new(),
                 relay_url: None,

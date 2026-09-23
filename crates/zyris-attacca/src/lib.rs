@@ -76,10 +76,6 @@ pub enum ZScope {
     /// stream, because a caller cannot tell "nothing happened" from "you weren't allowed to see it".
     #[serde(rename = "events:read")]
     EventsRead,
-    /// Register and list nodes under the caller's own authenticated device — the per-auth
-    /// management surface a machine that owns a device grant uses to mint sibling nodes.
-    #[serde(rename = "nodes:write")]
-    NodesWrite,
     /// P2P rendezvous between nodes on the same account — publish this node's own address and ask
     /// for a sibling's. The file itself never passes through Attacca, so what this scope opens is
     /// **the address book only**.
@@ -90,7 +86,7 @@ pub enum ZScope {
 impl ZScope {
     /// Every scope, in the order Attacca lists them. Useful for a node that wants to ask for
     /// everything and let the approving user cut it down.
-    pub const ALL: [ZScope; 19] = [
+    pub const ALL: [ZScope; 18] = [
         ZScope::AgentsRead,
         ZScope::AgentsWrite,
         ZScope::ProjectsRead,
@@ -108,7 +104,6 @@ impl ZScope {
         ZScope::KanbanRead,
         ZScope::KanbanWrite,
         ZScope::EventsRead,
-        ZScope::NodesWrite,
         ZScope::PeersWrite,
     ];
 
@@ -132,7 +127,6 @@ impl ZScope {
             ZScope::KanbanRead => "kanban:read",
             ZScope::KanbanWrite => "kanban:write",
             ZScope::EventsRead => "events:read",
-            ZScope::NodesWrite => "nodes:write",
             ZScope::PeersWrite => "peers:write",
         }
     }
@@ -645,49 +639,12 @@ pub enum ZTurnFrame {
     Status { running: bool },
 }
 
-/// What [`AttaccaApi::register_node`] takes: a permanent sibling node under the caller's own
-/// authenticated device — another agent of the same computer, e.g. a per-project zyris-cli
-/// checkout on the machine that already owns a device grant. The node's scopes are clamped
-/// server-side to the caller's own grant.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ZNewNode {
-    /// Display name; the server slugs it for the tool namespace like any node's.
-    pub name: String,
-    /// Platform label; `linux` when omitted.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub platform: Option<String>,
-    /// Scopes the node may carry. The server clamps these to the caller's own grant.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scopes: Vec<String>,
-}
-
-/// A node registered under the caller's device, as the server reports it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ZNode {
-    pub node_id: String,
-    pub name: String,
-    pub slug: String,
-    /// `linux` / `windows` / `macos` / `cli` / `other`.
-    pub platform: String,
-    #[serde(default)]
-    pub scopes: Vec<String>,
-    pub connected: bool,
-    /// One-time plaintext node token. Present only on the register response — `list_nodes` never
-    /// carries it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
-    /// RFC 3339.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_seen_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<String>,
-}
-
 /// A sibling node's iroh address, as [`AttaccaApi::peer_lookup`] answers it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ZPeerAddr {
     pub node_id: String,
-    pub slug: String,
+    /// The node path, `system/program/node` — the same string it was looked up by.
+    pub path: String,
     /// iroh EndpointId — an ed25519 public key. The peer proves its identity with this.
     pub endpoint_id: String,
     /// Hole-punching candidate addresses.
@@ -703,26 +660,27 @@ pub struct ZPeerAddr {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ZPeerEntry {
     pub node_id: String,
-    /// The name a user refers to this peer by. **It is a label, not a trust anchor.**
+    /// The node path, `system/program/node` (`zyris::NodeAddress::path`). **It is a label, not a
+    /// trust anchor.**
     ///
-    /// Do not key a peer-key pin on it, and do not key one on `node_id` or on `node_name`
-    /// (`TokenResponse.node_name` in `enroll/protocol.rs`) either. Every one of those is issued by
-    /// the server, and the server is precisely the party a pin exists to constrain: it can present
-    /// a substituted peer as a **new node**, which then arrives as "never seen before," passes any
-    /// check, and gets pinned — working every time and leaving no trace.
+    /// Do not key a peer-key pin on the value this field comes back with, and do not key one on
+    /// `node_id` either. Both are issued by the server, and the server is precisely the party a pin
+    /// exists to constrain: it can present a substituted peer as a **new node**, which then arrives
+    /// as "never seen before," passes any check, and gets pinned — working every time and leaving
+    /// no trace.
     ///
-    /// A slug looks user-chosen but is not. Measured against Attacca on 2026-08-10: it is derived
-    /// from the node's `name`, whose default on the device-grant path is the enrolling device's own
-    /// unverified self-report, and which the approval dialog pre-fills so a user can approve it
-    /// without typing anything. It is also neither unique nor stable — renames recompute it with no
-    /// collision check, no constraint backs it, and freeing a slug when a node is revoked so a new
-    /// node can take it is deliberate behaviour with a test asserting it. "Same name, different key"
-    /// is a supported workflow there, which is exactly the event a pin is supposed to catch.
+    /// A path looks user-chosen but is not. Every segment is a slug the server derived and
+    /// deduplicated: the system from what the approving person picked (pre-filled from the
+    /// enrolling machine's own unverified hostname), the program from what the program called
+    /// itself, and the node from what the connection asked for. A node's path is freed once its
+    /// connection is gone past the resume grace, so a *different* connection can take it. "Same
+    /// path, different key" is ordinary there, which is exactly the event a pin is supposed to
+    /// catch.
     ///
     /// So the anchor cannot come from the server at all. It comes from a person: the peer's key
     /// fingerprint is confirmed once, out of band, and the pin binds to the key that was confirmed.
-    /// The slug's job is to say which peer the user meant, and nothing more.
-    pub slug: String,
+    /// The path's job is to say which peer the user meant, and nothing more.
+    pub path: String,
     pub endpoint_id: String,
     pub online: bool,
 }
@@ -880,32 +838,6 @@ pub trait AttaccaApi {
         after: Option<i64>,
     ) -> zyris::Result<Streaming<ZTurnStatus, ZTurnFrame>>;
 
-    /// Register a permanent sibling node under this node's authenticated device — another agent of
-    /// the same computer, e.g. a per-project zyris-cli checkout on a machine that already owns a
-    /// device grant. The new node dials with its own static `znt_` token (shown once, never
-    /// retrievable again) and groups under the same device in the dashboard.
-    ///
-    /// Requires the `nodes:write` scope, and the node's scopes are clamped to this node's own
-    /// grant — it cannot be minted with more power than its creator holds.
-    async fn register_node(&self, request: ZNewNode) -> zyris::Result<ZNode>;
-
-    /// List the nodes registered under this node's authenticated device. Requires `nodes:write`;
-    /// never includes a token.
-    async fn list_nodes(&self) -> zyris::Result<Vec<ZNode>>;
-
-    /// Remove a sibling node registered under this node's authenticated device, revoking its
-    /// token. **The counterpart to [`AttaccaApi::register_node`]** — without it, every node a
-    /// program registers is permanent, and a client that registers one per window has no way to
-    /// tidy up after itself. Requires `nodes:write`.
-    ///
-    /// **A node cannot delete itself.** The answer would have to travel back down a connection the
-    /// deletion just revoked, so the caller could never tell the difference between "done" and
-    /// "the socket died." A request naming the calling node is refused.
-    ///
-    /// Deleting a node that is currently connected drops that connection: the token it dialled
-    /// with no longer exists.
-    async fn delete_node(&self, node_id: String) -> zyris::Result<()>;
-
     /// Publish this node's own iroh address. Call again whenever the address changes. `peers:write`.
     ///
     /// `endpoint_id` **keeps whatever value was published first.** A request to overwrite it with a
@@ -914,17 +846,14 @@ pub trait AttaccaApi {
 
     /// Ask for another node's address on the same account. `peers:write`.
     ///
-    /// **The lookup key is the slug, because that is the name a user says** — "send it to my
-    /// laptop." It is how the caller names the peer it meant, and nothing more. See
-    /// [`ZPeerEntry::slug`] for why it cannot also be what a peer-key pin binds to: the anchor is a
-    /// fingerprint a person confirmed out of band, not any name this server issues.
+    /// **The lookup key is the node path** — `laptop/zyris-code/myrepo`, a
+    /// `zyris::NodeAddress::path()`. It is how the caller names the peer it meant, and nothing
+    /// more. See [`ZPeerEntry::path`] for why it cannot also be what a peer-key pin binds to: the
+    /// anchor is a fingerprint a person confirmed out of band, not any name this server issues.
     ///
-    /// A slug is neither unique nor stable here, so an implementation that finds two live nodes
-    /// under one slug must **refuse rather than pick one.** Answering with an arbitrary node sends
-    /// the file to a machine the user did not name, and — because the pin is per-slug — surfaces as
-    /// "this peer's key changed," which is a false alarm at exactly the place a real one must be
-    /// believed.
-    async fn peer_lookup(&self, slug: String) -> zyris::Result<ZPeerAddr>;
+    /// A path is unique among live nodes, so there is at most one answer. A path no live node holds
+    /// is refused, never answered with a near match.
+    async fn peer_lookup(&self, path: String) -> zyris::Result<ZPeerAddr>;
 
     /// List the nodes on the same account. Used to decide whether an incoming connection may be
     /// accepted. `peers:write`.
