@@ -447,6 +447,21 @@ async fn an_inbox_that_does_not_exist_yet_lists_nothing_rather_than_failing() {
     assert_eq!(fixture.transfer.inbox_list().await.unwrap(), Vec::new());
 }
 
+/// The inbox files a sender under its node path with `/` written as `_` (`Inbox::resolve`), and
+/// the listing has to give that path back rather than the directory's spelling of it.
+#[tokio::test]
+async fn inbox_list_names_the_sender_by_its_node_path() {
+    let fixture = Fixture::new(Ok(peer("laptop", 1))).await;
+    let filed = fixture.inbox.path().join("laptop_zyris-code_myrepo");
+    tokio::fs::create_dir_all(&filed).await.unwrap();
+    tokio::fs::write(filed.join("notes.txt"), b"hi").await.unwrap();
+
+    let listed = fixture.transfer.inbox_list().await.unwrap();
+
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0].from, "laptop/zyris-code/myrepo");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Guard: the read jail
 // ---------------------------------------------------------------------------------------------

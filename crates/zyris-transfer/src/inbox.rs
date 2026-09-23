@@ -48,10 +48,12 @@ impl Inbox {
 
     /// Settles the final path and creates its parent directory.
     ///
-    /// `peer_slug` gets washed too — the peer names itself, so that is untrusted input as much as
-    /// the file name is.
-    pub async fn resolve(&self, peer_slug: &str, proposed: &str) -> Result<PathBuf, InboxError> {
-        let parent = self.root.join(safe_name(peer_slug));
+    /// `peer` is the sender's node path, `system/program/node`. It gets washed too — the server
+    /// names it, so that is untrusted input as much as the file name is — and its `/` become `_`,
+    /// which no slug contains: two nodes that share a name on different machines never share a
+    /// directory, and `inbox_list` can turn the directory back into the path.
+    pub async fn resolve(&self, peer: &str, proposed: &str) -> Result<PathBuf, InboxError> {
+        let parent = self.root.join(safe_name(&peer.replace('/', "_")));
         tokio::fs::create_dir_all(&parent).await.map_err(|e| InboxError::Io(e.to_string()))?;
 
         let root = tokio::fs::canonicalize(&self.root)

@@ -602,13 +602,13 @@ impl FileTransfer for LocalFileTransfer {
                     )))
                 }
             };
-            // Received files always sit one level down, under the sending peer's washed name
-            // (`Inbox::resolve`). Anything else at the top level is not something this node put
-            // there.
+            // Received files always sit one level down, under the sending peer's washed path
+            // (`Inbox::resolve`), whose `/` were written as `_`. Anything else at the top level is
+            // not something this node put there.
             if !peer.path().is_dir() {
                 continue;
             }
-            let from = peer.file_name().to_string_lossy().into_owned();
+            let from = peer.file_name().to_string_lossy().replace('_', "/");
             // A sender's directory that has been removed since the walk above listed it is simply
             // gone, and skipping it is right. Any other failure is not "there is nothing here".
             let mut files = match tokio::fs::read_dir(peer.path()).await {
