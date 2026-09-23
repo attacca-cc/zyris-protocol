@@ -6,6 +6,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use zyris_proto::{
@@ -654,9 +655,13 @@ impl Features {
     }
 }
 
+/// How an acceptor settles its `HelloAck`: from the dialer's `Hello`, once it has arrived.
+pub(crate) type Decide =
+    Box<dyn FnOnce(&Hello) -> BoxFuture<'static, Result<AcceptOptions>> + Send>;
+
 pub(crate) enum Role {
     Dial { agent: String, kind: String, name: String },
-    Accept { options: AcceptOptions },
+    Accept { decide: Decide },
 }
 
 pub(crate) async fn establish(
@@ -724,7 +729,7 @@ pub(crate) async fn establish(
                 ack.heartbeat,
             )
         }
-        Role::Accept { options } => {
+        Role::Accept { decide } => {
             let hello = match read_handshake(&mut stream).await? {
                 Envelope::Hello(hello) => hello,
                 _ => return Err(WireError::new(ErrorCode::ParseError, "expected hello")),
@@ -746,6 +751,19 @@ pub(crate) async fn establish(
                     format!("peer speaks v{}", hello.protocol.major),
                 ));
             }
+            // Decided only now, because the answer can depend on what the hello said: an acceptor
+            // that names nodes makes the address out of `hello.node_name`.
+            let options = match decide(&hello).await {
+                Ok(options) => options,
+                Err(error) => {
+                    // Said before the close, so the dialer reads a reason rather than a dropped
+                    // socket.
+                    let refusal = Envelope::Err { id: 0, error: error.clone() };
+                    let _ = send_handshake(&mut sink, &refusal).await;
+                    let _ = sink.close(CLOSE_NORMAL, error.message.clone()).await;
+                    return Err(error);
+                }
+            };
             let serialization = hello
                 .serialization
                 .first()

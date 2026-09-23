@@ -20,6 +20,7 @@ use crate::serve::ServeCapability;
 use crate::transport::Transport;
 #[cfg(feature = "client")]
 use zyris_proto::NodeAddress;
+use zyris_proto::Hello;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeKind {
@@ -165,9 +166,26 @@ impl Node {
         transport: impl Transport,
         options: AcceptOptions,
     ) -> Result<Connection> {
+        self.accept_with(transport, move |_: &Hello| async move { Ok(options) }).await
+    }
+
+    /// Accept, deciding the `HelloAck` only once the dialer's `Hello` has been read.
+    ///
+    /// An acceptor that names nodes needs this: the address it answers with is made from
+    /// `Hello.node_name`. An `Err` from `decide` goes to the dialer as a handshake error, the
+    /// socket is closed, and the same error is returned here.
+    pub async fn accept_with<F, Fut>(
+        &self,
+        transport: impl Transport,
+        decide: F,
+    ) -> Result<Connection>
+    where
+        F: FnOnce(&Hello) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<AcceptOptions>> + Send + 'static,
+    {
         establish(
             Box::new(transport),
-            Role::Accept { options },
+            Role::Accept { decide: Box::new(move |hello: &Hello| Box::pin(decide(hello))) },
             self.capabilities.clone(),
         )
         .await

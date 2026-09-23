@@ -5,7 +5,7 @@
 //! because `zyrisd peers` borrows the node's credential to call an API and must not be mistaken
 //! for the node itself — should not have to substring-match its way to that decision.
 
-use zyris::proto::{decode_binary, Envelope, IncomingFrame, WireMessage};
+use zyris::proto::{decode_binary, Envelope, Hello, IncomingFrame, WireMessage};
 use zyris::transport::{ChannelTransport, Transport};
 use zyris::{AcceptOptions, Node, NodeAddress, NodeKind};
 
@@ -96,4 +96,51 @@ async fn the_address_the_acceptor_assigns_is_what_both_ends_read() {
     let (dial_conn, _) =
         zyris::testing::duplex(&node_of(NodeKind::Cli), &node_of(NodeKind::Server)).await.unwrap();
     assert_eq!(dial_conn.info().node, None);
+}
+
+/// An acceptor that names nodes has to read the hello first: the address it answers with is made
+/// from `Hello.node_name`, which does not exist until the hello does.
+#[tokio::test]
+async fn an_acceptor_can_answer_with_what_the_hello_said() {
+    let (dial_side, accept_side) = ChannelTransport::pair();
+    let dialer = Node::builder().name("myrepo").kind(NodeKind::Service).build().unwrap();
+    let acceptor = node_of(NodeKind::Server);
+    let accepting = acceptor.accept_with(accept_side, |hello: &Hello| {
+        let name = hello.node_name.clone().unwrap_or_default();
+        async move {
+            Ok(AcceptOptions {
+                node: Some(NodeAddress {
+                    system: "laptop".into(),
+                    program: "zyris-code".into(),
+                    name,
+                }),
+                ..Default::default()
+            })
+        }
+    });
+
+    let (dialed, accepted) = tokio::join!(dialer.connect_over(dial_side), accepting);
+    let (dialed, _accepted) = (dialed.unwrap(), accepted.unwrap());
+    assert_eq!(
+        dialed.info().node.as_ref().map(NodeAddress::path),
+        Some("laptop/zyris-code/myrepo".to_string())
+    );
+}
+
+/// And one that refuses — a node hello with no name, a user over the live-node cap — says why
+/// before it closes, so the dialer reads a reason rather than a dropped socket.
+#[tokio::test]
+async fn an_acceptor_that_refuses_the_hello_says_why() {
+    let (dial_side, accept_side) = ChannelTransport::pair();
+    let acceptor = node_of(NodeKind::Server);
+    let accepting = acceptor.accept_with(accept_side, |_: &Hello| async {
+        Err::<AcceptOptions, _>(zyris::WireError::invalid_params("a node has to say its name"))
+    });
+
+    let dialer = node_of(NodeKind::Service);
+    let (dialed, accepted) = tokio::join!(dialer.connect_over(dial_side), accepting);
+    let refused = dialed.err().expect("a refused hello is not a connection");
+    assert_eq!(refused.code, zyris::ErrorCode::InvalidParams);
+    assert!(refused.message.contains("say its name"), "{refused:?}");
+    assert!(accepted.is_err(), "the acceptor reports the refusal it made");
 }
