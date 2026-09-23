@@ -38,8 +38,8 @@ default = ["client", "hostname"]
 client = ["dep:tokio-tungstenite", "dep:rustls"]
 axum = ["dep:axum"]
 testing = []
-# Self-registration over the RFC 8628 device grant, and the `Account` layer that mints node tokens
-# from what it issues. Off by default so a node using a static `znt_` pays nothing for them. The
+# Self-registration over the RFC 8628 device grant. Off by default so a node handed its `zc_`
+# credential some other way — a secret manager, an environment variable — pays nothing for it. The
 # marginal cost when it is on is smaller than it looks: `client` already pulls rustls and the
 # native root store through `tokio-tungstenite`, so `reqwest` reuses that TLS stack and only adds
 # the hyper/tower layer. It takes `rustls-no-provider` rather than `rustls` for that reason too:

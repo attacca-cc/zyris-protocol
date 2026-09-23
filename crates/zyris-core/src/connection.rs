@@ -6,13 +6,14 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use zyris_proto::{
     attach, decode_binary, decode_text, encode_control, encode_stream_data, method_name,
     split_method, AckProtocol, AnnounceParams, AnnounceResult, AttachmentRef, CapabilityDescriptor,
     AttachmentTrailer, ClosingParams, Envelope, ErrorCode, HeartbeatConfig, Hello, HelloAck, HelloProtocol,
-    IncomingFrame, Limits, Payload, RejectedCapability, Serialization, StreamDecl, WireError,
+    IncomingFrame, Limits, NodeAddress, Payload, RejectedCapability, Serialization, StreamDecl, WireError,
     WireMessage, CLOSE_NORMAL, CLOSE_UNSUPPORTED_VERSION, FEATURE_ATTACHMENTS, FEATURE_CANCEL,
     FEATURE_HEARTBEAT, INLINE_BLOB_MAX, METHOD_ANNOUNCE, METHOD_CLOSING, METHOD_HEARTBEAT,
     PROTOCOL_MAJOR, PROTOCOL_MINOR,
@@ -125,6 +126,10 @@ pub struct ConnectionInfo {
     /// an acceptor deciding how to treat a connection should not be reading it with a substring
     /// match.
     pub peer_kind: Option<String>,
+    /// Where this connection's node was put: from `HelloAck.node` on the dialing side, and what
+    /// this side assigned (`AcceptOptions::node`) on the accepting side. `None` for a `cli` dial
+    /// and for an acceptor that assigned nothing.
+    pub node: Option<NodeAddress>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -135,6 +140,9 @@ pub(crate) enum Side {
 
 pub struct AcceptOptions {
     pub node_id: String,
+    /// The address answered in `HelloAck.node`. `None` assigns nothing, which is what a `cli`
+    /// dialer and an acceptor that does not name nodes send.
+    pub node: Option<NodeAddress>,
     pub conn_id: String,
     pub resume_token: String,
     pub resumed: bool,
@@ -151,6 +159,7 @@ impl Default for AcceptOptions {
     fn default() -> Self {
         AcceptOptions {
             node_id: uuid::Uuid::new_v4().simple().to_string(),
+            node: None,
             conn_id: uuid::Uuid::new_v4().simple().to_string(),
             resume_token: uuid::Uuid::new_v4().simple().to_string(),
             resumed: false,
@@ -646,9 +655,13 @@ impl Features {
     }
 }
 
+/// How an acceptor settles its `HelloAck`: from the dialer's `Hello`, once it has arrived.
+pub(crate) type Decide =
+    Box<dyn FnOnce(&Hello) -> BoxFuture<'static, Result<AcceptOptions>> + Send>;
+
 pub(crate) enum Role {
-    Dial { agent: String, kind: String },
-    Accept { options: AcceptOptions },
+    Dial { agent: String, kind: String, name: String },
+    Accept { decide: Decide },
 }
 
 pub(crate) async fn establish(
@@ -659,7 +672,7 @@ pub(crate) async fn establish(
     let (mut sink, mut stream) = transport.split();
 
     let (serialization, limits, info, reserved, features, heartbeat) = match role {
-        Role::Dial { agent, kind } => {
+        Role::Dial { agent, kind, name } => {
             let local = vec![
                 FEATURE_CANCEL.to_string(),
                 FEATURE_ATTACHMENTS.to_string(),
@@ -670,6 +683,7 @@ pub(crate) async fn establish(
                 serialization: vec![Serialization::Msgpack, Serialization::Json],
                 agent,
                 kind: Some(kind),
+                node_name: Some(name),
                 features: local.clone(),
                 resume: None,
             });
@@ -704,6 +718,7 @@ pub(crate) async fn establish(
                 serialization: ack.serialization,
                 peer_agent: None,
                 peer_kind: None,
+                node: ack.node.clone(),
             };
             (
                 ack.serialization,
@@ -714,7 +729,7 @@ pub(crate) async fn establish(
                 ack.heartbeat,
             )
         }
-        Role::Accept { options } => {
+        Role::Accept { decide } => {
             let hello = match read_handshake(&mut stream).await? {
                 Envelope::Hello(hello) => hello,
                 _ => return Err(WireError::new(ErrorCode::ParseError, "expected hello")),
@@ -736,6 +751,23 @@ pub(crate) async fn establish(
                     format!("peer speaks v{}", hello.protocol.major),
                 ));
             }
+            // Decided only now, because the answer can depend on what the hello said: an acceptor
+            // that names nodes makes the address out of `hello.node_name`.
+            let options = match decide(&hello).await {
+                Ok(options) => options,
+                Err(error) => {
+                    // Said before the close, so the dialer reads a reason rather than a dropped
+                    // socket.
+                    let refusal = Envelope::Err { id: 0, error: error.clone() };
+                    let _ = send_handshake(&mut sink, &refusal).await;
+                    // The full reason already went out in `refusal` above; the close frame is a
+                    // courtesy for whatever is watching at the transport level, and RFC 6455 caps
+                    // its reason at 123 bytes (125 minus the 2-byte code) — `decide` is free to
+                    // hand back an arbitrarily long `error.message`.
+                    let _ = sink.close(CLOSE_NORMAL, truncate_close_reason(&error.message)).await;
+                    return Err(error);
+                }
+            };
             let serialization = hello
                 .serialization
                 .first()
@@ -747,6 +779,7 @@ pub(crate) async fn establish(
                 conn_id: options.conn_id.clone(),
                 resume_token: options.resume_token.clone(),
                 node_id: options.node_id.clone(),
+                node: options.node.clone(),
                 heartbeat: options.heartbeat,
                 limits: options.limits,
                 resumed: options.resumed,
@@ -761,6 +794,7 @@ pub(crate) async fn establish(
                 serialization,
                 peer_agent: Some(hello.agent),
                 peer_kind: hello.kind,
+                node: options.node,
             };
             (
                 serialization,
@@ -835,6 +869,21 @@ pub(crate) async fn establish(
         });
     }
     Ok(conn)
+}
+
+/// A websocket close frame's reason is capped at 123 bytes by RFC 6455 (125 for the whole
+/// control-frame payload, minus the 2-byte code). Cutting at a byte count alone can land inside a
+/// multi-byte UTF-8 character, so this backs up to the nearest character boundary instead.
+fn truncate_close_reason(message: &str) -> String {
+    const MAX_BYTES: usize = 123;
+    if message.len() <= MAX_BYTES {
+        return message.to_string();
+    }
+    let mut end = MAX_BYTES;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    message[..end].to_string()
 }
 
 async fn send_handshake(sink: &mut Box<dyn WireSink>, envelope: &Envelope) -> Result<()> {
@@ -1277,4 +1326,36 @@ fn handle_announce(shared: &Arc<Shared>, id: u64, params: Payload) {
 
 pub(crate) fn typed_method(capability: &str, tool: &str) -> String {
     method_name(capability, tool)
+}
+
+#[cfg(test)]
+mod close_reason_tests {
+    use super::truncate_close_reason;
+
+    /// A short reason is not this function's problem; it must come back untouched.
+    #[test]
+    fn a_reason_within_the_limit_is_left_alone() {
+        assert_eq!(truncate_close_reason("scope agents:write not granted"), "scope agents:write not granted");
+    }
+
+    /// RFC 6455's close-frame payload is 125 bytes total, 2 of which are the code, leaving 123
+    /// for the reason. A `decide` callback can hand back anything, so this is the backstop.
+    #[test]
+    fn a_reason_over_the_limit_is_cut_to_123_bytes() {
+        let long = "x".repeat(200);
+        let cut = truncate_close_reason(&long);
+        assert_eq!(cut.len(), 123);
+        assert_eq!(cut, "x".repeat(123));
+    }
+
+    /// Cutting at a raw byte count can land inside a multi-byte character; this must back up to
+    /// a character boundary instead of producing a string `String` would refuse to hold.
+    #[test]
+    fn the_cut_lands_on_a_char_boundary_not_mid_character() {
+        // Each "é" is 2 bytes, so 123 bytes lands exactly between the two bytes of one of them.
+        let long = "é".repeat(100);
+        let cut = truncate_close_reason(&long);
+        assert!(cut.len() <= 123);
+        assert!(std::str::from_utf8(cut.as_bytes()).is_ok(), "must still be valid UTF-8");
+    }
 }

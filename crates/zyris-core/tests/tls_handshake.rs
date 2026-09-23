@@ -274,7 +274,7 @@ async fn a_wss_dial_completes_a_real_handshake_and_speaks_zyris_inside_it() {
 
     let dialer = Node::builder().name("tls-dialer").kind(NodeKind::Cli).build().expect("a node");
 
-    let connection = tokio::time::timeout(PATIENCE, dialer.dial(&url, "znt_probe"))
+    let connection = tokio::time::timeout(PATIENCE, dialer.dial(&url, "zc_probe"))
         .await
         .expect("the dial has to settle inside the deadline")
         .expect("a certificate signed by the only trusted CA has to be accepted");
@@ -286,7 +286,7 @@ async fn a_wss_dial_completes_a_real_handshake_and_speaks_zyris_inside_it() {
         .flatten();
     assert_eq!(
         seen.as_deref(),
-        Some("Bearer znt_probe"),
+        Some("Bearer zc_probe"),
         "the header `ws::connect` adds has to arrive, and it has to arrive decrypted"
     );
 
@@ -304,7 +304,7 @@ async fn a_wss_dial_completes_a_real_handshake_and_speaks_zyris_inside_it() {
     // verifying — which is the state a handshake test is most likely to be quietly wrong in.
     let (impostor_chain, impostor_key) = stranger.loopback_leaf();
     let impostor = tls_node(impostor_chain, impostor_key, heard_tx).await;
-    let refused = tokio::time::timeout(PATIENCE, dialer.dial(&impostor, "znt_probe"))
+    let refused = tokio::time::timeout(PATIENCE, dialer.dial(&impostor, "zc_probe"))
         .await
         .expect("the dial has to settle inside the deadline")
         .err()

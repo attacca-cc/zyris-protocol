@@ -20,13 +20,12 @@
 //! however it is spelled, fails it the same way. Two are worth naming anyway, since they are
 //! the ones most likely to end up
 //! here by a well-meaning mistake: attacca's own `node_id` (see `ConnectionInfo` in
-//! `zyris-core/src/connection.rs`), and `TokenResponse.node_name`
-//! (`zyris-core/src/enroll/protocol.rs`), which gets persisted as `AccountCredential.node_name`
-//! (`zyris-core/src/account.rs`) and looks
+//! `zyris-core/src/connection.rs`), and the node path it assigns (`HelloAck.node`,
+//! `ZPeerEntry::path`), which looks
 //! enough like a user-facing label to be mistaken for one. It is not: attacca supplies it,
 //! unverified, exactly like `node_id`, and reports it fresh for every node — nothing stops a
-//! fake B from arriving with a *new* `node_id` and the *same* `node_name` as the real one, or a
-//! `node_name` chosen to look however it likes. Whichever server-issued string ends up in this
+//! fake B from arriving with a *new* `node_id` and the *same* `path` as the real one, or a
+//! `path` chosen to look however it likes. Whichever server-issued string ends up in this
 //! slot, the fake arrives as an unknown peer, passes `check` (nothing is pinned under an
 //! identifier nobody has seen before), and gets pinned — every time, with no mark left
 //! anywhere. Keying on a name the user picked, that attacca has no channel to silently
@@ -168,7 +167,7 @@ impl TofuStore {
     ///
     /// `peer_slug` **must be a name the user chose, and one that no server can re-issue** —
     /// that is the property, not a specific field to avoid. It must never be attacca's
-    /// `node_id`, `TokenResponse.node_name`, or any other string attacca supplies — see the
+    /// `node_id`, the path it assigns (`HelloAck.node`), or any other string attacca supplies — see the
     /// module docs for why keying on any of those defeats the whole point of pinning.
     ///
     /// A ledger we cannot read is an error, not an empty ledger. See the module docs.

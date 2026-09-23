@@ -31,7 +31,7 @@ fn probe() -> Node {
 #[cfg(not(any(feature = "tls-ring", feature = "tls-aws-lc")))]
 #[tokio::test]
 async fn dialling_wss_without_a_tls_provider_is_refused_by_name() {
-    let Err(error) = probe().dial("wss://127.0.0.1:1/", "znt_whatever").await else {
+    let Err(error) = probe().dial("wss://127.0.0.1:1/", "zc_whatever").await else {
         panic!("nothing is listening on port 1, so this dial cannot have succeeded");
     };
 
@@ -63,7 +63,7 @@ async fn the_refusal_is_decided_before_anything_reaches_the_network() {
     let address = listener.local_addr().expect("no local address");
 
     let url = format!("wss://{address}/zyris/v1/ws");
-    let Err(error) = probe().dial(&url, "znt_whatever").await else {
+    let Err(error) = probe().dial(&url, "zc_whatever").await else {
         panic!("this build selected no TLS provider, so the dial cannot have succeeded");
     };
     assert!(
@@ -87,7 +87,7 @@ async fn the_refusal_is_decided_before_anything_reaches_the_network() {
 #[cfg(not(any(feature = "tls-ring", feature = "tls-aws-lc")))]
 #[tokio::test]
 async fn a_plaintext_url_needs_no_provider() {
-    let Err(error) = probe().dial("ws://127.0.0.1:1/", "znt_whatever").await else {
+    let Err(error) = probe().dial("ws://127.0.0.1:1/", "zc_whatever").await else {
         panic!("nothing is listening on port 1, so this dial cannot have succeeded");
     };
 
@@ -103,7 +103,7 @@ async fn a_plaintext_url_needs_no_provider() {
 #[cfg(any(feature = "tls-ring", feature = "tls-aws-lc"))]
 #[tokio::test]
 async fn a_build_that_named_a_provider_gets_past_the_gate() {
-    let Err(error) = probe().dial("wss://127.0.0.1:1/", "znt_whatever").await else {
+    let Err(error) = probe().dial("wss://127.0.0.1:1/", "zc_whatever").await else {
         panic!("nothing is listening on port 1, so this dial cannot have succeeded");
     };
 

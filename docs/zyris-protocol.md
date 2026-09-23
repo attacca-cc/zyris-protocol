@@ -18,7 +18,7 @@ worked example.
 ## 0. Writing a node
 
 `crates/zyris/examples/hello.rs` is a complete, runnable node in one file — one capability with
-one tool, plus enrollment, node registration and the connection. Start there; this document is the
+one tool, plus enrollment and the connection. Start there; this document is the
 normative wire reference, not a tutorial. Run it with
 
 ```bash
@@ -111,7 +111,7 @@ with the registry above.
 
 ```
 CLOSED ──dial──▶ AUTHENTICATING ──upgrade ok──▶ HELLO ──hello/hello_ack──▶ READY
-   ▲                   │ 4401                      │ unsupported_version → CLOSED (4400)
+   ▲                   │ HTTP 401                  │ unsupported_version → CLOSED (4400)
    │                   ▼                           │
    └────────────── CLOSED ◀── CLOSING ◀── zyris.closing / ws close / heartbeat timeout
         reconnect w/ resume_token within grace ⇒ presence continuity (§3.4)
@@ -119,21 +119,24 @@ CLOSED ──dial──▶ AUTHENTICATING ──upgrade ok──▶ HELLO ──
 
 ### 3.1 Auth
 
-The dialer sends `Authorization: Bearer <credential>` on the upgrade request. Auth failure closes
-the socket with websocket code `4401` before any Zyris frame. What a valid credential *looks like*
-is the deployment's choice; the wire only requires that it ride in that header.
+The dialer sends `Authorization: Bearer <credential>` on the upgrade request. Auth failure refuses
+the upgrade with HTTP `401` before either side has spoken the protocol — there is no websocket to
+close yet. What a valid credential *looks like* is the deployment's choice; the wire only requires
+that it ride in that header.
 
-The socket authenticates once at the upgrade and nothing re-checks it, so a deployment that supports
-revocation or credential expiry needs an in-band way to act on it. The recommended shape, and
-Attacca's: the periodic heartbeat also reports whether the node was revoked and when its newest
-credential expires, and the peer holding the socket closes it on either. Without that, revocation
-takes effect only on whichever replica happens to see the revoke call.
+The socket authenticates once at the upgrade and nothing re-checks it, so a deployment that
+revokes credentials mid-connection needs an in-band way to act on it, since a credential itself
+never expires. The recommended shape, and Attacca's: the periodic heartbeat also reports whether
+the node was revoked, and the peer holding the socket closes it with websocket code `4401` when it
+is. Without that, revocation takes effect only on whichever replica happens to see the revoke call.
 
-Attacca's scheme, as the worked example: two credential kinds, dispatched **by prefix** before any
-database work — a static `znt_` node token, or a short-lived `zna_` access token from device
-enrollment (§7). Both are hashed at rest and carry the node's scopes. `znr_` refresh tokens and
-`zdc_` device codes are valid credentials for *other* endpoints and are refused here explicitly,
-never by happening not to hash to anything.
+Attacca's scheme, as the worked example: one credential kind, a long-lived `zc_` credential issued
+to one (system, program) pair (§7), hashed at rest and carrying the scopes chosen when it was
+issued. It never expires; it is revoked from the web UI. Anything else — the retired `zna_` access,
+`znr_` refresh and `znt_` node tokens included — is simply unknown: the upgrade is refused with
+HTTP 401, exactly like a revoked or mistyped `zc_`, and `zyris` reports `ConnectError::Unauthorized`.
+A client reads that as "discard the stored credential and enroll again"; there is no separate
+re-enroll signal.
 
 ### 3.2 Handshake
 
@@ -145,7 +148,9 @@ outcome of negotiation.
 { "t": "hello",
   "protocol": { "major": 1, "minors_supported": [0] },
   "serialization": ["msgpack", "json"],
-  "agent": "zyris-node/0.1.0 (linux; x86_64)",
+  "agent": "zyris/0.2.0 (myrepo; service)",
+  "kind": "service",                                          // optional
+  "node_name": "myrepo",                                      // optional; see below
   "features": ["cancel", "attachments", "video-webrtc", "video-mjpeg"],
   "resume": { "conn_id": "…", "resume_token": "…" } }        // optional
 
@@ -155,6 +160,7 @@ outcome of negotiation.
   "serialization": "msgpack",
   "conn_id": "…", "resume_token": "…",
   "node_id": "…",
+  "node": { "system": "laptop", "program": "zyris-code", "name": "myrepo-2" },   // optional
   "heartbeat": { "interval_s": 20, "timeout_s": 45 },
   "limits": { "max_control_frame": 1048576, "max_chunk": 262144,
               "max_inflight_reqs": 64, "initial_stream_credit": 262144 },
@@ -166,6 +172,25 @@ Version mismatch ⇒ `err unsupported_version` then websocket close `4400`. A pe
 send frames gated behind a feature the other side did not advertise. `features` is absent
 on an acceptor that predates the field, which reads as advertising nothing — the safe
 answer, since a feature is usable only when it appears in *both* lists.
+
+`node_name` is the name the connection asks to be known by. It is optional on the wire, so a peer
+that predates it still parses, but a deployment that names nodes may require it: Attacca answers a
+non-`cli` hello without one with `err invalid_params` and closes. `kind: "cli"` is a consumer that
+registers no node, and its `node_name` is ignored.
+
+`node` is where the acceptor put the connection: three slugs, written as the path
+`system/program/name` (`zyris::NodeAddress::path`). It is absent for a `cli` dialer and from an
+acceptor that predates the field. The name is the requested one when it is free among the *live*
+nodes at that `system/program` path — counting every credential that shares the program name, not
+only this one — and the lowest free `-2`, `-3`… otherwise, so read it back rather than assuming it.
+zyris-core never sends `Hello.resume`: instead, a `node_name` that matches a row of the *same*
+credential released within the grace, or gone stale, takes that row back by name, keeping its
+`node_id` and `node` — so a crash does not turn `desktop` into `desktop-2`. Any other connect is a
+new node with a new `node_id`.
+
+`accept_with`'s `decide` callback has no built-in timeout: an acceptor that does slow work there
+(a database lookup to pick the node's name, say) has to bound it itself, or a slow decision hangs
+the handshake indefinitely.
 
 ### 3.3 Heartbeat and close
 
@@ -326,58 +351,70 @@ Enrollment is out-of-band: it happens over HTTP before the websocket exists, so 
 Zyris wire. It is documented here because `zyris` implements this half of it too, and because a node
 author has to choose a credential source before anything else works.
 
-**The library holds no credential of its own and picks no path to keep one at.** Every step hands its
-result back as a value: `enroll()` returns an `Enrollment` whose `code()` is a `Code` to display,
-`Enrollment::wait` returns an `AccountCredential`, and `Account::register_node` returns a `NodeToken`.
-Storing them — a file, a keychain, a Kubernetes Secret, a database row — is the caller's, and so is
-whether a code becomes a printed block, a window in a TUI, or a line in a journal.
+**Three things, one address.** A *system* is a machine (`laptop`). A *credential* is a long-lived
+`zc_` bearer issued to one program on one system (`zyris-code` on `laptop`). A *node* is one live
+connection made with a credential (`myrepo`). A node's address is `system/program/node` —
+`laptop/zyris-code/myrepo` — and every segment is a slug of `[a-z0-9-]`, at most 32 characters,
+with the display name kept beside it. A name already taken gets the lowest free `-2`, `-3`…: a
+system within its user, and a node among the *live* nodes at that `system/program` path — counted
+across every credential that shares the program name, not just this one, since program names
+themselves never collide-check (two live credentials can both be `zyris-code`; nothing numbers
+programs). Two instances started from the *same* credential with the same requested name are no
+exception: they get `myrepo`, `myrepo-2`, `myrepo-3`…, and none displaces another.
 
-- **Enrollment (device grant, default)**: the node starts unconfigured and runs RFC 8628. It
-  `POST`s `/zyris/v1/device/authorize`, prints an 8-character base-20 code, and polls
-  `/zyris/v1/device/token`. The user types that code into the deployment's web UI on whatever device
-  has a browser, reviews what the node is asking for, and authorizes; the node's next poll receives
-  an access token and a refresh token, which it stores at `0600` and rotates itself.
+**The library holds no credential of its own and picks no path to keep one at.** Every step hands
+its result back as a value: `enroll()` returns an `Enrollment` whose `code()` is a `Code` to
+display, and `Enrollment::wait` returns a `Credential`. Storing it — a file, a keychain, a
+Kubernetes Secret, a database row — is the caller's, and so is whether a code becomes a printed
+block, a window in a TUI, or a line in a journal. A `Credential` is serde, never expires and never
+rotates, so it is written once.
+
+- **Issuing a credential (device grant)**: the program starts unconfigured and runs RFC 8628. It
+  `POST`s `/zyris/v1/device/authorize` with `{program, system_hint, platform, scopes, client_hint}`
+  — `program` is its own name, `system_hint` is `zyris::machine_name()` — receives an 8-character
+  base-20 code, and polls `/zyris/v1/device/token`. The user types the code into the deployment's
+  web UI on whatever device has a browser, picks the system (by default the one named
+  `system_hint`, or a new one; nothing on the machine is fingerprinted), reviews the program name
+  and scopes, and approves. The next poll receives
+  `{credential, system: {id, name, slug}, program: {id, name, slug}, scopes, owner_email}`.
   `verification_uri_complete` is always null; the `verification_uri` points at the code-entry
-  screen, so the user has no button to hunt for while a code expires. Daemon config is
-  `{ server_url }`, and even that is optional: `zyris::DEFAULT_SERVER_URL` is
-  `wss://attacca.cc/api/zyris/v1/ws`, and the HTTP base for the device endpoints is derived from it
-  by truncating at `/zyris/`, so a node cannot enroll against one deployment while connecting to
-  another.
-- **Where the bearer comes from**: `Node::connect(url, token)` and `Node::dial(url, token)` take any
-  bearer string, so a node provisioned with a `znt_` out of a secret manager never touches the
-  enrollment code at all. A node that enrolled instead mints its bearer from what enrollment issued:
-  `Account::restore(server_url, credential)` picks the pair back up, and `Account::register_node`
-  returns a `NodeToken` to dial with. `Account` is behind the `enroll` feature, which is not on by
-  default — the static-token path costs nothing for the device grant it never runs.
-- **Rotation**: only the account credential rotates; a `znt_` node token is static and is never
-  handed back. `Account` refreshes the pair on its own schedule (at 80% of the access token's
-  lifetime, not at expiry) and hands each new pair to the async `on_rotate` hook the caller
-  installed. **The hook has to succeed before the library adopts the new pair.** A refresh token is
-  single-use: if a process began presenting a pair that never reached the caller's storage, its next
-  start would present the spent one, and Attacca reads a replay past its 30-second grace as a leaked
-  chain and revokes every node under that credential. Rotating early is what makes waiting for the
-  hook safe — there are roughly twelve minutes of slack in which it can fail without stopping a dial,
-  and a failure inside that window is logged and the credential still held is carried on with.
+  screen, so the user has no button to hunt for while a code expires. `zyris::DEFAULT_SERVER_URL`
+  is `wss://attacca.cc/api/zyris/v1/ws`, and the HTTP base for the device endpoints is derived from
+  it by truncating at `/zyris/`, so a program cannot enroll against one deployment while
+  connecting to another.
+- **Issuing a credential (web)**: the user picks a system, a program name and scopes in the web UI
+  and is shown the `zc_` once. This is the provisioning path with nobody at the machine —
+  image-baked nodes, CI, containers — and it produces the same kind of credential.
+- **Connecting**: `Node::connect(url, credential.secret())` and `Node::dial(url, bearer)` take any
+  bearer string, so a program provisioned with a `zc_` out of a secret manager never touches
+  enrollment at all; the `enroll` feature is off by default. `Node::builder().name("myrepo")` is
+  sent as `Hello.node_name` (§3.2), and `Link::address()` returns the `NodeAddress` from the latest
+  `HelloAck`. A reconnect that lands within the grace gets its old identity back by name (§3.2); one
+  that does not is a new node, which gets its old name back when that is free and `-2` when it is
+  not.
 - **Staying connected**: `Node::connect` returns a `Link` that owns the dial-and-reconnect loop —
   backoff with jitter, reset after a healthy connection — and returns as soon as the first dial has
   settled. A refusal no retry can fix (`Revoked`, `Unauthorized`, `VersionMismatch`) is that call's
-  error; anything else is the link's problem and it goes on trying. `Link::wait_closed` resolves when
-  the link is finished and `Link::disconnect` ends it, giving the closing frame time to land. There
-  is no signal handler and no exit code: when the process stops is the program's decision.
-- **Enrollment (static token)**: the user creates a node in the web UI and the server mints a
-  one-time-displayed token (prefix retained for display, hash stored, scopes attached). Daemon
-  config is `{ server_url, node_token }`. Retained for provisioning with no human in the loop —
-  image-baked nodes, CI, and shared service accounts, where a credential file cannot be protected
-  from anyone able to `sudo -u` that account.
-- **Scopes**: a node's grant, decided at enrollment and enforced by the server on every call into a
-  reserved capability. The vocabulary is the deployment's; Attacca reuses its API-scope names. A
-  node that only *serves* capabilities needs no scopes at all.
-- **Node naming**: a node proposes a name at enrollment — by default its hostname, via
-  `zyris::machine_name()` — and the approving user may change it. After enrollment the name is
-  local only: renaming in the node's environment does not rename an existing node.
-- **Presence**: online on READY; on disconnect a resume grace (30 s in Attacca) runs before offline.
-  A periodic sweep marks nodes offline whose last heartbeat exceeds 2× the heartbeat interval, as a
-  backstop against a server replica dying with the socket open.
+  error; anything else is the link's problem and it goes on trying. `Link::wait_closed` resolves
+  when the link is finished and `Link::disconnect` ends it, giving the closing frame time to land.
+  There is no signal handler and no exit code: when the process stops is the program's decision.
+- **Revocation**: a credential is revoked from the web UI, directly or by deleting its system, and
+  its nodes are closed. From then on the upgrade is refused with 401 and `connect` fails with
+  `ConnectError::Unauthorized`: forget the credential and enroll again. That is the only case that
+  reaches the client automatically — a credential the client itself drops (logout, a lost file)
+  stays valid until a person revokes it by hand in the web UI, since nothing tells Attacca it was
+  dropped. Approving again meanwhile just issues a second credential with the same program name;
+  nothing is renumbered, and if both end up connected at once their nodes are told apart by the
+  node suffix. There is no automatic replace-on-reapproval, and no separate re-enroll signal.
+- **Scopes**: belong to the credential, chosen when it is issued; every node made with it has
+  exactly those. The vocabulary is the deployment's; Attacca reuses its API-scope names. Creating
+  nodes needs no scope — it is what a credential is for — and a node that only *serves*
+  capabilities needs no scopes at all.
+- **Presence**: a node exists while its connection does. On READY it is live; on disconnect a
+  resume grace (30 s in Attacca) runs, after which the node is gone and its name is free again.
+  `node_id` is therefore new on every connect that did not resume, and nothing should hold one
+  durably. A periodic sweep removes nodes whose last heartbeat exceeds 2× the heartbeat interval,
+  as a backstop against a server replica dying with the socket open.
 
 The server-side registry — what a deployment stores per node, how ownership is fenced, how presence
 fans out to a UI — is deployment-internal. See `docs/zyris-protocol.md` in the

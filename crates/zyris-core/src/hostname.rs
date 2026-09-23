@@ -1,19 +1,20 @@
-//! What this machine calls itself, for a node that would rather not be configured.
+//! What this machine calls itself, for a program that would rather not be configured.
 //!
-//! A node's name is the thing an agent sees in `zyris__{slug}__{capability}__{tool}`, so leaving it
-//! at a crate-wide default means every node on every machine announces the same one. The hostname is
-//! the only identifier already true of the box, already meaningful to whoever set it, and already
-//! distinct between machines — which is exactly the shape of a good default.
+//! A node's address is `system/program/node`, and the system is the machine. A program offers this
+//! as `EnrollRequest::system_hint` when it enrols, so the approval screen can preselect the system
+//! of that name rather than make a person type one. The hostname is the only identifier already
+//! true of the box, already meaningful to whoever set it, and already distinct between machines —
+//! which is exactly the shape of a good default.
 
 /// This machine's short name, or `None` when it has nothing usable to say.
 ///
 /// `$HOSTNAME` wins over the kernel's answer. In a container the kernel hostname is a truncated
 /// container id, while the orchestrator sets `$HOSTNAME` to the pod name — the one a human would
-/// recognise on a node card.
+/// recognise in a node path.
 ///
 /// The result is cut at the first `.`, so `laptop.local` and `build-01.internal.example` become
 /// `laptop` and `build-01`. The domain half says where the machine is, not which machine it is, and
-/// the slug that carries this into tool names only has 16 characters to spend.
+/// each segment of a node path only has 32 characters to spend.
 pub fn machine_name() -> Option<String> {
     std::env::var("HOSTNAME")
         .ok()

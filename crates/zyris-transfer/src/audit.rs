@@ -9,6 +9,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AuditLine {
     pub at_ms: u64,
+    /// The sender's node path (`system/program/node`), not a bare slug despite the field's name —
+    /// kept as-is because this is a serialized, on-disk format.
     pub peer_slug: String,
     pub peer_endpoint: String,
     pub name: String,

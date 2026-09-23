@@ -99,6 +99,15 @@ pub struct Hello {
     /// to keep meaning "did not say" rather than any particular kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// The name this connection asks to be known by — `myrepo`, `desktop`. The acceptor slugifies
+    /// it, takes the lowest free `-2`, `-3`… among the live nodes at the same `system/program`
+    /// path, across every credential with that program name, and answers with the result in
+    /// [`HelloAck::node`]. A deployment that names nodes may require it of anything that is not a
+    /// `cli` dialer; a `cli` dialer registers no node and its name is ignored.
+    ///
+    /// Optional on the wire so a peer built before this field keeps parsing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_name: Option<String>,
     #[serde(default)]
     pub features: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -112,6 +121,11 @@ pub struct HelloAck {
     pub conn_id: String,
     pub resume_token: String,
     pub node_id: String,
+    /// Where the acceptor put this connection, as three slugs. `None` for a `cli` dialer, and from
+    /// an acceptor that predates the field. A resume keeps it; any other connect may not, because a
+    /// node lives only as long as its connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeAddress>,
     pub heartbeat: HeartbeatConfig,
     pub limits: Limits,
     #[serde(default)]
@@ -120,6 +134,37 @@ pub struct HelloAck {
     /// acceptor built before this field parses here as advertising nothing, which is the truth.
     #[serde(default)]
     pub features: Vec<String>,
+}
+
+/// A node's address: `system/program/name`, each segment a slug the acceptor assigned.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct NodeAddress {
+    pub system: String,
+    pub program: String,
+    pub name: String,
+}
+
+impl NodeAddress {
+    /// `"system/program/name"`.
+    pub fn path(&self) -> String {
+        format!("{}/{}/{}", self.system, self.program, self.name)
+    }
+
+    /// Inverse of [`path`](Self::path); `None` unless there are exactly three non-empty segments.
+    pub fn parse(path: &str) -> Option<NodeAddress> {
+        let mut segments = path.split('/');
+        let (system, program, name) = (segments.next()?, segments.next()?, segments.next()?);
+        if segments.next().is_some() || [system, program, name].iter().any(|s| s.is_empty()) {
+            return None;
+        }
+        Some(NodeAddress { system: system.into(), program: program.into(), name: name.into() })
+    }
+}
+
+impl std::fmt::Display for NodeAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.path())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

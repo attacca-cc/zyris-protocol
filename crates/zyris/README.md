@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .kind(NodeKind::Service)
         .capability(MyServer(my_impl))
         .build()?
-        .connect(zyris::DEFAULT_SERVER_URL, std::env::var("ZYRIS_NODE_TOKEN")?)
+        .connect(zyris::DEFAULT_SERVER_URL, std::env::var("ZYRIS_CREDENTIAL")?)
         .await?;
 
     link.wait_closed().await?;
@@ -32,8 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 There is no exit code, no signal handler and no config directory in that snippet, and none in
-this crate either. Enrollment hands the code back as a value, `Account` hands rotations back
-through a callback, and when the process stops is the program's decision.
+this crate either. Enrollment hands the code and the credential back as values, and when the
+process stops is the program's decision.
 
 ## What this crate is
 

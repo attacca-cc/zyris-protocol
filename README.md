@@ -33,9 +33,9 @@ provider is refused by name (`ConnectError::NoTlsProvider`) rather than left to 
 `tls-ring` for it, or `tls-aws-lc` to override the choice. Both compile C, which is the whole
 reason neither is on by default.
 
-`caps` adds the standard capability declarations; `enroll` adds the 8-character-code flow and the
-account layer below, and implies `tls-ring` because a device grant is an HTTPS exchange. Neither is
-on by default, because a node holding a `znt_` token out of a secret manager needs neither.
+`caps` adds the standard capability declarations; `enroll` adds the 8-character-code flow that
+issues a `zc_` credential, and implies `tls-ring` because a device grant is an HTTPS exchange.
+Neither is on by default, because a node holding a `zc_` out of a secret manager needs neither.
 
 ```rust
 use zyris::{Node, NodeKind};
@@ -43,14 +43,14 @@ use zyris::{Node, NodeKind};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `HelloServer` is what `#[zyris::capability]` generated from the trait below, wrapped around
-    // your implementation of it. The token is any bearer string — see `examples/hello.rs` for
+    // your implementation of it. The credential is any bearer string — see `examples/hello.rs` for
     // where one comes from if you do not have one yet.
     let link = Node::builder()
-        .name(zyris::machine_name())
+        .name("my-node")
         .kind(NodeKind::Service)
         .capability(HelloServer(HelloWorld))
         .build()?
-        .connect(zyris::DEFAULT_SERVER_URL, std::env::var("ZYRIS_NODE_TOKEN")?)
+        .connect(zyris::DEFAULT_SERVER_URL, std::env::var("ZYRIS_CREDENTIAL")?)
         .await?;
 
     // `connect` keeps the link up across drops. `Node::dial` is the single attempt underneath it,
@@ -109,7 +109,7 @@ cargo run -p zyris --example hello --features enroll
 With nothing configured it enrolls against `attacca.cc`: it prints an 8-character code, you type
 that into Attacca on whatever device has a browser, and it connects. Ask an agent on that account
 to call `hello.greet` and the node answers "Hello World". Point it elsewhere with
-`ZYRIS_SERVER_URL`, or skip the code entirely with `ZYRIS_NODE_TOKEN`.
+`ZYRIS_SERVER_URL`, or skip the code entirely with `ZYRIS_CREDENTIAL`.
 
 That one file is the whole library end to end, which is what makes it worth reading before
 anything else here.
@@ -117,7 +117,7 @@ anything else here.
 ### A larger node
 
 [`ridanit-ruma/zyris-hello`](https://github.com/ridanit-ruma/zyris-hello) is the reference for
-building a real one: it stores its credential and node token on disk, transfers files directly
+building a real one: it stores its credential on disk, transfers files directly
 between nodes, and announces `screen_capture` and `input` behind a feature so an agent can see a
 display and drive it. It used to live here as `crates/zyris-hello` and moved out with its history —
 this repository is a library, and a program belongs in one of its own.

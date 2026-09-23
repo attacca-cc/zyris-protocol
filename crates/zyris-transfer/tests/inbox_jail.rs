@@ -78,3 +78,15 @@ async fn rejects_even_when_the_destination_itself_is_a_symlink() {
     let result = inbox.resolve("peer", "a.txt").await;
     assert!(matches!(result, Err(InboxError::SymlinkInPath)), "actual: {result:?}");
 }
+
+/// Node names repeat across machines — every checkout of `myrepo` is `…/myrepo` — so the inbox has
+/// to file by the whole path, or two senders' files land in one directory and overwrite each other.
+#[tokio::test]
+async fn two_nodes_with_one_name_on_two_machines_get_two_directories() {
+    let (dir, inbox) = temp_inbox();
+    let laptop = inbox.resolve("laptop/zyris-code/myrepo", "a.txt").await.unwrap();
+    let server = inbox.resolve("srv-a/zyris-code/myrepo", "a.txt").await.unwrap();
+
+    assert_ne!(laptop.parent(), server.parent());
+    assert_eq!(laptop, dir.path().join("laptop_zyris-code_myrepo").join("a.txt"));
+}

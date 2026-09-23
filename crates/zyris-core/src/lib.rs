@@ -1,7 +1,6 @@
-#[cfg(feature = "enroll")]
-pub mod account;
 mod capabilities;
 mod connection;
+mod credential;
 #[cfg(any(feature = "client", feature = "enroll"))]
 mod tls;
 
@@ -28,15 +27,11 @@ pub use hostname::machine_name;
 
 pub use capabilities::Capabilities;
 pub use connection::{AcceptOptions, CapabilityClient, Connection, ConnectionInfo, RawIncomingStream};
-pub use error::{
-    CloseReason, ConnectError, EnrollError, Error, ErrorCode, RegisterError, Result,
-    RotateError, TransportError,
-};
+pub use credential::{Credential, Named};
+pub use error::{CloseReason, ConnectError, EnrollError, Error, ErrorCode, Result, TransportError};
 pub use handle::{CapabilityHandle, MAX_HYDRATE_BYTES};
 // A module and a function may share a name — they live in different namespaces — so `zyris::enroll`
 // is the module for `protocol`, and `zyris::enroll(url, request)` is the call that starts one.
-#[cfg(feature = "enroll")]
-pub use account::{Account, AccountBuilder, AccountCredential, NodeSpec, NodeToken};
 #[cfg(feature = "enroll")]
 pub use enroll::device::{enroll, Code, EnrollRequest, Enrollment, Progress};
 #[cfg(feature = "client")]
@@ -49,8 +44,8 @@ pub use serve::{
 
 pub use zyris_proto as proto;
 pub use zyris_proto::{
-    AttachmentRef, AttachmentTrailer, Blob, CallLimit, CapabilityDescriptor, Chunk, Datum, Payload,
-    Serialization, ToolDescriptor, Transfer, WireError, INLINE_BLOB_MAX,
+    AttachmentRef, AttachmentTrailer, Blob, CallLimit, CapabilityDescriptor, Chunk, Datum,
+    NodeAddress, Payload, Serialization, ToolDescriptor, Transfer, WireError, INLINE_BLOB_MAX,
 };
 
 pub use async_trait::async_trait;

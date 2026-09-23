@@ -47,9 +47,10 @@ pub struct InboxEntry {
 pub trait FileTransfer {
     /// Send a file on this machine to another node on the same account.
     ///
-    /// `node` is the name a user says — "send it to my laptop". It says which peer was meant and
-    /// nothing more: it is not what the peer's key is trusted through. See `ZPeerEntry::slug` in
-    /// `zyris-attacca` for why a name a server issues can never be the anchor.
+    /// `node` is the node's path, `system/program/node` — for example `laptop/zyris-code/myrepo`.
+    /// It says which peer was meant and nothing more: it is not what the peer's key is trusted
+    /// through. See `ZPeerEntry::path` in `zyris-attacca` for why a name a server issues can never
+    /// be the anchor.
     ///
     /// If it cannot finish within 60 seconds the reply is **not an error** — it comes back with
     /// `pending: true`, and `next` says to call again. Attacca cuts a node call off at 60 seconds

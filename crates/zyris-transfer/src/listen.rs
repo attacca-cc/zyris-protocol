@@ -9,18 +9,17 @@
 //!
 //! The sending side pins, because it has something worth keying a pin on: the name the *caller*
 //! typed, which attacca has no channel to reassign. This side has no such string. It knows an
-//! `EndpointId` and whatever name the rendezvous attaches to it — and `ZPeerEntry::slug`'s own doc
-//! is explicit that the slug is not a trust anchor: it is derived from a node `name` whose default
-//! is the enrolling device's unverified self-report, it is neither unique nor stable, and freeing a
-//! revoked node's slug so a *different* node can take it is deliberate, tested behaviour.
+//! `EndpointId` and whatever name the rendezvous attaches to it — and `ZPeerEntry::path`'s own doc
+//! is explicit that the path is not a trust anchor: every segment of it is a slug the server
+//! derived, and a path is freed once its connection is gone so that a *different* node can take it.
 //!
 //! So a pin written here would be keyed on a string the server chooses. That is the exact shape
 //! `zyris_p2p::tofu`'s module doc calls out: a substituted peer arrives under a name nothing is
 //! pinned under, passes, and gets pinned — every time, leaving no mark. Asking a person first does
 //! not fix it, because the person would be confirming a name attacca picked.
 //!
-//! What this side does instead is **check and never write**. A slug the user has already pinned by
-//! sending to it refuses a changed key, which is the protection that was ever real. A slug nobody
+//! What this side does instead is **check and never write**. A path the user has already pinned by
+//! sending to it refuses a changed key, which is the protection that was ever real. A path nobody
 //! has pinned is let through and stays unpinned, so the ledger only ever holds names a person
 //! actually said. The cost is that a peer we only receive from is never pinned; the alternative was
 //! pinning it under a name that could not carry the weight.
@@ -234,19 +233,19 @@ async fn serve_one(
         return;
     };
 
-    // The slug names which peer this is, and that is all it is used for here — the inbox
+    // The path names which peer this is, and that is all it is used for here — the inbox
     // subdirectory it files under, which `Inbox::resolve` washes into a single safe component.
     // Nothing is authorized by it. See this module's docs for why it is not pinned under either.
-    let slug = entry.slug.clone();
+    let path = entry.path.clone();
 
-    // Read-only. A slug the sending side pinned refuses a changed key here too; a slug nobody has
+    // Read-only. A path the sending side pinned refuses a changed key here too; a path nobody has
     // pinned passes and stays unpinned.
-    if let Err(error) = tofu.check(&slug, &peer).await {
-        tracing::error!(%peer, %slug, %error, "the peer's key is not the one pinned for this name; refusing");
+    if let Err(error) = tofu.check(&path, &peer).await {
+        tracing::error!(%peer, %path, %error, "the peer's key is not the one pinned for this name; refusing");
         return;
     }
 
-    let receiving = LocalPeerTransfer::receiver_pending(config, slug.clone());
+    let receiving = LocalPeerTransfer::receiver_pending(config, path.clone());
     let node = match Node::builder()
         .name("peer")
         .kind(NodeKind::Cli)
@@ -276,7 +275,7 @@ async fn serve_one(
     match connection.wait_capability(CAPABILITY_WAIT).await {
         Ok(client) => receiving.set_peer(client),
         Err(error) => {
-            tracing::warn!(%peer, %slug, %error, "the peer never announced peer_transfer; it cannot send to us");
+            tracing::warn!(%peer, %path, %error, "the peer never announced peer_transfer; it cannot send to us");
         }
     }
 
@@ -288,10 +287,10 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn entry(slug: &str, endpoint_id: &str) -> ZPeerEntry {
+    fn entry(path: &str, endpoint_id: &str) -> ZPeerEntry {
         ZPeerEntry {
-            node_id: format!("node-{slug}"),
-            slug: slug.to_string(),
+            node_id: format!("node-{path}"),
+            path: path.to_string(),
             endpoint_id: endpoint_id.to_string(),
             online: true,
         }
@@ -326,8 +325,8 @@ mod tests {
         let mut cache =
             PeerCache::new(directory.clone(), Duration::from_secs(60), Duration::from_secs(10));
 
-        assert_eq!(cache.find("abc").await.unwrap().slug, "laptop");
-        assert_eq!(cache.find("abc").await.unwrap().slug, "laptop");
+        assert_eq!(cache.find("abc").await.unwrap().path, "laptop");
+        assert_eq!(cache.find("abc").await.unwrap().path, "laptop");
         assert_eq!(directory.calls(), 1, "a hit inside the TTL must not re-ask");
     }
 
@@ -353,12 +352,12 @@ mod tests {
         let mut cache =
             PeerCache::new(directory.clone(), Duration::from_secs(60), Duration::ZERO);
 
-        // Looked up by endpoint id — the only thing an arriving connection carries. The slug is
+        // Looked up by endpoint id — the only thing an arriving connection carries. The path is
         // what comes back, not what goes in.
         assert!(cache.find("def").await.is_none());
         directory.entries.lock().await.push(entry("desk", "def"));
 
-        assert_eq!(cache.find("def").await.unwrap().slug, "desk");
+        assert_eq!(cache.find("def").await.unwrap().path, "desk");
     }
 
     /// A revoked node has to stop being found, so a refresh replaces the list rather than merging

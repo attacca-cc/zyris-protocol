@@ -352,31 +352,18 @@ impl LocalFileTransfer {
 
     /// Asks the rendezvous which machine the caller meant.
     ///
-    /// **A slug is neither unique nor stable, so two live nodes can answer to one name.**
-    /// `AttaccaApi::peer_lookup`'s contract is that an implementation finding that must refuse
-    /// rather than pick one, and refusing is the only safe answer: sending to an arbitrary one of
-    /// them puts the file on a machine the caller did not name, and — because the pin is per-name
-    /// — surfaces here as "this peer's key changed", a false alarm at exactly the place a real one
-    /// has to be believed.
+    /// `node` is a node path, `system/program/node`, and a path is unique among live nodes, so the
+    /// rendezvous answers about one node or refuses. What is checked here is the one thing this
+    /// call can see: that the answer names the peer that was asked for. An answer about some other
+    /// node is refused rather than dialed — sending anyway puts the file on a machine nobody named,
+    /// and, because the pin is keyed on what the caller said, would surface as "this peer's key
+    /// changed", a false alarm at exactly the place a real one has to be believed.
     ///
-    /// **That refusal is not re-implemented here, because this call cannot see the collision.**
-    /// The ambiguity is visible in `peer_list`, which returns every node with its `slug`, `node_id`
-    /// and `online` flag; `peer_lookup` returns one already-chosen `ZPeerAddr`, so by the time the
-    /// answer arrives the choice has been made and there is nothing left to count. Fetching
-    /// `peer_list` as well to count it here would put the decision on a *second*, separately-timed
-    /// answer from the same server that just gave the first — two answers that can disagree, and a
-    /// new rule about which to believe. Against a rendezvous that is lying, neither call helps:
-    /// both come from it.
-    ///
-    /// What is checked here is the one thing this call **can** see: that the answer names the peer
-    /// that was asked for. An answer about some other node is refused rather than dialed.
-    ///
-    /// The comparison ignores ASCII case, because a deployment that canonicalizes slugs may well
-    /// answer a lookup for `Laptop` with `laptop` and mean the same machine. **The pin's ledger key
-    /// does not fold case** — see [`Self::authorize_peer`]. The two are asking different questions:
-    /// this one asks whether the server answered about the peer that was named, and folding is
-    /// tolerance; that one asks what the caller actually said, and folding there would quietly
-    /// merge two slots into one.
+    /// The comparison ignores ASCII case, because a caller may type `Laptop/…` for the slug
+    /// `laptop/…` and mean the same machine. **The pin's ledger key does not fold case** — see
+    /// [`Self::authorize_peer`]. The two are asking different questions: this one asks whether the
+    /// server answered about the peer that was named, and folding is tolerance; that one asks what
+    /// the caller actually said, and folding there would quietly merge two slots into one.
     async fn look_up_peer(&self, node: &str) -> Result<ZPeerAddr> {
         let current = self.api.get();
         let Some(api) = current else {
@@ -388,13 +375,13 @@ impl LocalFileTransfer {
             .retriable(true));
         };
         let addr = api.peer_lookup(node.to_string()).await?;
-        if !addr.slug.eq_ignore_ascii_case(node) {
+        if !addr.path.eq_ignore_ascii_case(node) {
             return Err(refuse(
                 "peer_lookup_mismatch",
                 format!(
                     "asked for {node} and the rendezvous answered about {} ({}); \
                      refusing to send to a node that was not named",
-                    addr.slug, addr.node_id
+                    addr.path, addr.node_id
                 ),
             ));
         }
@@ -407,18 +394,18 @@ impl LocalFileTransfer {
 
     /// Settles whether this key is the one a person confirmed for this name.
     ///
-    /// `label` is the name **the caller asked for, verbatim** — not [`ZPeerAddr::slug`] and not
+    /// `label` is the name **the caller asked for, verbatim** — not [`ZPeerAddr::path`] and not
     /// [`ZPeerAddr::node_id`]. Both of those are minted by attacca, which is the party the pin
     /// exists to constrain: keying the ledger on either lets a substituted peer arrive under a
     /// freshly-issued identifier, land in a slot nothing has been pinned in, pass, and get pinned
     /// — every time, leaving no trace. The name the caller said is the one string in this call the
     /// server has no channel to reassign, so it is the one the ledger is keyed on. See
-    /// `zyris_p2p::tofu`'s module docs and `ZPeerEntry::slug` in `zyris-attacca`.
+    /// `zyris_p2p::tofu`'s module docs and `ZPeerEntry::path` in `zyris-attacca`.
     ///
-    /// This is what makes the case attacca actually supports — freeing a revoked node's slug so a
-    /// new node can take it — come out as a refusal here instead of a silent redirection: the new
-    /// node answers to the same word the caller said, that word already has a different key pinned
-    /// under it, and the mismatch is exactly what a pin is for.
+    /// This is what makes the case attacca actually supports — freeing a node's path once its
+    /// connection is gone so a different node can take it — come out as a refusal here instead of
+    /// a silent redirection: the new node answers to the same path the caller said, that path
+    /// already has a different key pinned under it, and the mismatch is exactly what a pin is for.
     ///
     /// [`TofuStore::authorize`], not `check` + `pin_preapproved`: those two compose into the flow
     /// where an unknown peer is pinned on its first successful connection with nobody asked, which
@@ -615,13 +602,13 @@ impl FileTransfer for LocalFileTransfer {
                     )))
                 }
             };
-            // Received files always sit one level down, under the sending peer's washed name
-            // (`Inbox::resolve`). Anything else at the top level is not something this node put
-            // there.
+            // Received files always sit one level down, under the sending peer's washed path
+            // (`Inbox::resolve`), whose `/` were written as `_`. Anything else at the top level is
+            // not something this node put there.
             if !peer.path().is_dir() {
                 continue;
             }
-            let from = peer.file_name().to_string_lossy().into_owned();
+            let from = peer.file_name().to_string_lossy().replace('_', "/");
             // A sender's directory that has been removed since the walk above listed it is simply
             // gone, and skipping it is right. Any other failure is not "there is nothing here".
             let mut files = match tokio::fs::read_dir(peer.path()).await {
