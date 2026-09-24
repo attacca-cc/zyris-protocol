@@ -645,20 +645,12 @@ pub struct ZDelivered {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ZTurnFrame {
-    Event {
-        cursor: i64,
-        event: ZSessionEvent,
-    },
-    Delta {
-        kind: ZDeltaKind,
-        text: String,
-    },
+    Event { cursor: i64, event: ZSessionEvent },
+    Delta { kind: ZDeltaKind, text: String },
     /// This turn was stopped, not finished. Sent before the `Status { running: false }` that
     /// ends it, and also sent when a delivery point cut an already-finished turn.
     Cancelled,
-    Status {
-        running: bool,
-    },
+    Status { running: bool },
 }
 
 /// A sibling node's iroh address, as [`AttaccaApi::peer_lookup`] answers it.
