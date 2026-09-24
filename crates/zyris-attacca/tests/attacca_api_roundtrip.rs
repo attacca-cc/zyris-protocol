@@ -7,12 +7,12 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use zyris::{Datum, Node, NodeKind, Streaming, Transfer};
 use zyris_attacca::{
-    attacca_api_capability, AttaccaApi, AttaccaApiClient, AttaccaApiPeerLookupRequest,
-    AttaccaApiServer, ZAgent, ZDeltaKind, ZHistoryQuery, ZJob, ZJobFilter, ZJobState, ZJobUpdate,
-    ZMe, ZNewAgent, ZNewJob, ZNewProject, ZNewSession, ZNewWork, ZPeerAddr, ZPeerEntry, ZProject,
-    ZProjectUpdate, ZScope, ZSession, ZSessionEvent, ZSessionFilter, ZTask, ZTaskDep, ZTaskState,
-    ZTurnFrame, ZTurnStatus, ZUsage, ZWork, ZWorkFilter, ZWorkState, ZWorkTasks, ZWorkUpdate,
-    ATTACCA_API_CAPABILITY,
+    attacca_api_capability, AttaccaApi, AttaccaApiCancelTurnRequest, AttaccaApiClient,
+    AttaccaApiPeerLookupRequest, AttaccaApiServer, ZAgent, ZDelivered, ZDeltaKind, ZHistoryQuery,
+    ZJob, ZJobFilter, ZJobState, ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewProject, ZNewSession,
+    ZNewWork, ZPeerAddr, ZPeerEntry, ZProject, ZProjectUpdate, ZScope, ZSession, ZSessionEvent,
+    ZSessionFilter, ZTask, ZTaskDep, ZTaskState, ZTurnFrame, ZTurnStatus, ZUsage, ZWork,
+    ZWorkFilter, ZWorkState, ZWorkTasks, ZWorkUpdate, ATTACCA_API_CAPABILITY,
 };
 
 struct StubApi;
@@ -246,8 +246,20 @@ impl AttaccaApi for StubApi {
         Ok(())
     }
 
-    async fn cancel_turn(&self, _session_id: String) -> zyris::Result<()> {
-        Ok(())
+    // Stub: echo the delivery point back through an error so the client side can see it arrived
+    // intact.
+    async fn cancel_turn(
+        &self,
+        session_id: String,
+        delivered: Option<ZDelivered>,
+    ) -> zyris::Result<()> {
+        match delivered {
+            None => Ok(()),
+            Some(d) => Err(zyris::WireError::invalid_params(format!(
+                "{session_id}:{:?}:{}",
+                d.cursor, d.chars
+            ))),
+        }
     }
 
     async fn list_jobs(&self, filter: ZJobFilter) -> zyris::Result<Vec<ZJob>> {
@@ -384,6 +396,7 @@ impl AttaccaApi for StubApi {
                 },
             }),
             Ok(ZTurnFrame::Delta { kind: ZDeltaKind::Assistant, text: "hi".into() }),
+            Ok(ZTurnFrame::Cancelled),
             Ok(ZTurnFrame::Status { running: false }),
         ];
         Ok(Streaming::new(head, futures_util::stream::iter(frames)))
@@ -564,7 +577,7 @@ async fn node_calls_the_unary_tools() {
     assert_eq!(session.title.as_deref(), Some("Rollout"));
 
     api.send_message("session-1".into(), "go".into(), vec![]).await.unwrap();
-    api.cancel_turn("session-1".into()).await.unwrap();
+    api.cancel_turn("session-1".into(), None).await.unwrap();
 }
 
 #[tokio::test]
@@ -677,10 +690,56 @@ async fn turn_events_streams_head_then_frames() {
     while let Some(frame) = stream.items.next().await {
         frames.push(frame.unwrap());
     }
-    assert_eq!(frames.len(), 3);
+    assert_eq!(frames.len(), 4);
     assert!(matches!(frames[0], ZTurnFrame::Event { cursor: 7, .. }));
     assert!(matches!(frames[1], ZTurnFrame::Delta { kind: ZDeltaKind::Assistant, .. }));
-    assert!(matches!(frames[2], ZTurnFrame::Status { running: false }));
+    assert!(matches!(frames[2], ZTurnFrame::Cancelled));
+    assert!(matches!(frames[3], ZTurnFrame::Status { running: false }));
+}
+
+#[tokio::test]
+async fn cancel_turn_carries_a_delivery_point() {
+    let api = client().await;
+    api.cancel_turn("session-1".into(), None).await.unwrap();
+    let err = api
+        .cancel_turn(
+            "session-1".into(),
+            Some(ZDelivered {
+                cursor: Some(42),
+                chars: 17,
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("session-1:Some(42):17"), "{err:?}");
+    let err = api
+        .cancel_turn(
+            "session-1".into(),
+            Some(ZDelivered {
+                cursor: None,
+                chars: 3,
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("session-1:None:3"), "{err:?}");
+}
+
+/// A node built before `delivered` existed sends only `session_id`; that must still decode, as a
+/// plain stop.
+#[test]
+fn cancel_turn_request_without_delivered_decodes_as_a_plain_stop() {
+    let old: AttaccaApiCancelTurnRequest =
+        serde_json::from_value(serde_json::json!({ "session_id": "s" })).unwrap();
+    assert_eq!(old.delivered, None);
+    assert_eq!(
+        serde_json::to_value(ZDelivered {
+            cursor: None,
+            chars: 5
+        })
+        .unwrap(),
+        serde_json::json!({ "chars": 5 })
+    );
 }
 
 #[tokio::test]

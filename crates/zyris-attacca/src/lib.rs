@@ -631,12 +631,34 @@ pub struct ZSessionEvent {
     pub created_at: Option<String>,
 }
 
+/// How far the answer reached the person when they interrupted. Sent with `cancel_turn`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ZDelivered {
+    /// The `chat_agent` event the node was delivering, as the `cursor` of the `Event` frame it
+    /// received. `None`: the answer still streaming as `Delta` frames, not yet an event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<i64>,
+    /// How much of that answer was delivered, in Unicode scalar values (`char`s).
+    pub chars: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ZTurnFrame {
-    Event { cursor: i64, event: ZSessionEvent },
-    Delta { kind: ZDeltaKind, text: String },
-    Status { running: bool },
+    Event {
+        cursor: i64,
+        event: ZSessionEvent,
+    },
+    Delta {
+        kind: ZDeltaKind,
+        text: String,
+    },
+    /// This turn was stopped, not finished. Sent before the `Status { running: false }` that
+    /// ends it, and also sent when a delivery point cut an already-finished turn.
+    Cancelled,
+    Status {
+        running: bool,
+    },
 }
 
 /// A sibling node's iroh address, as [`AttaccaApi::peer_lookup`] answers it.
@@ -764,8 +786,18 @@ pub trait AttaccaApi {
         data: Vec<Datum>,
     ) -> zyris::Result<()>;
 
-    /// Stop the running turn on a session.
-    async fn cancel_turn(&self, session_id: String) -> zyris::Result<()>;
+    /// Stop the running turn on a session, and keep only what the person got.
+    ///
+    /// Whatever answer text streamed before the stop is kept. With `delivered`, the stored answer is
+    /// cut to what the node actually delivered: `cursor: None` cuts the answer still streaming;
+    /// `cursor: Some(c)` cuts that `chat_agent` event and empties every later answer in its turn (a
+    /// finished turn is cut too). A cursor that is unknown, stale, not a `chat_agent` event, or
+    /// `cursor: None` with no turn running, is refused with `invalid_params`. `None` just stops.
+    async fn cancel_turn(
+        &self,
+        session_id: String,
+        delivered: Option<ZDelivered>,
+    ) -> zyris::Result<()>;
 
     /// List the caller's jobs, newest first.
     async fn list_jobs(&self, filter: ZJobFilter) -> zyris::Result<Vec<ZJob>>;
@@ -830,7 +862,8 @@ pub trait AttaccaApi {
     ) -> zyris::Result<()>;
 
     /// Live turn feed with cursor resume: the head carries the current running flag and
-    /// last cursor; items mirror LiveFrame (durable events with cursor, deltas, status).
+    /// last cursor; items mirror LiveFrame (durable events with cursor, deltas, `cancelled`,
+    /// status).
     #[zyris(uni_stream)]
     async fn turn_events(
         &self,

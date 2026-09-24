@@ -18,10 +18,10 @@ use std::time::Duration;
 
 use zyris::{Chunk, Datum, ErrorCode, Node, NodeKind, Result, Streaming, WireError};
 use zyris_attacca::{
-    AttaccaApi, AttaccaApiClient, AttaccaApiServer, ZAgent, ZHistoryQuery, ZJob, ZJobFilter,
-    ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewProject, ZNewSession, ZNewWork,
-    ZPeerAddr, ZPeerEntry, ZProject, ZProjectUpdate, ZSession, ZSessionEvent, ZSessionFilter,
-    ZTurnFrame, ZTurnStatus, ZUsage, ZWork, ZWorkFilter, ZWorkTasks, ZWorkUpdate,
+    AttaccaApi, AttaccaApiClient, AttaccaApiServer, ZAgent, ZDelivered, ZHistoryQuery, ZJob,
+    ZJobFilter, ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewProject, ZNewSession, ZNewWork, ZPeerAddr,
+    ZPeerEntry, ZProject, ZProjectUpdate, ZSession, ZSessionEvent, ZSessionFilter, ZTurnFrame,
+    ZTurnStatus, ZUsage, ZWork, ZWorkFilter, ZWorkTasks, ZWorkUpdate,
 };
 use zyris_caps::file_transfer::{FileTransfer, SendReceipt};
 use zyris_caps::peer_transfer::{
@@ -106,7 +106,7 @@ impl AttaccaApi for StubRendezvous {
     async fn send_message(&self, _s: String, _m: String, _d: Vec<Datum>) -> Result<()> {
         unused()
     }
-    async fn cancel_turn(&self, _session_id: String) -> Result<()> {
+    async fn cancel_turn(&self, _session_id: String, _delivered: Option<ZDelivered>) -> Result<()> {
         unused()
     }
     async fn list_jobs(&self, _filter: ZJobFilter) -> Result<Vec<ZJob>> {
