@@ -622,6 +622,11 @@ pub enum ZDeltaKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ZSessionEvent {
+    /// The event's stable id. An event arriving with an id already held under another `seq` has
+    /// moved (a message re-sequenced to where the turn received it): drop the old entry. Absent on a
+    /// deployment that predates the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub seq: i64,
     pub cursor: i64,
     pub kind: String,
@@ -883,4 +888,34 @@ pub trait AttaccaApi {
     /// List the nodes on the same account. Used to decide whether an incoming connection may be
     /// accepted. `peers:write`.
     async fn peer_list(&self) -> zyris::Result<Vec<ZPeerEntry>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_session_event_round_trips_its_id() {
+        let event = ZSessionEvent {
+            id: Some("7d7c3f4e-0000-4000-8000-000000000001".into()),
+            seq: 5,
+            cursor: 9,
+            kind: "chat_user".into(),
+            payload: serde_json::json!({ "content": "hi" }),
+            created_at: None,
+        };
+        let wire = serde_json::to_value(&event).unwrap();
+        assert_eq!(wire["id"], "7d7c3f4e-0000-4000-8000-000000000001");
+        let back: ZSessionEvent = serde_json::from_value(wire).unwrap();
+        assert_eq!(back.id.as_deref(), Some("7d7c3f4e-0000-4000-8000-000000000001"));
+    }
+
+    #[test]
+    fn a_session_event_from_an_older_server_decodes_without_an_id() {
+        let back: ZSessionEvent = serde_json::from_value(serde_json::json!({
+            "seq": 1, "cursor": 1, "kind": "chat_user", "payload": { "content": "hi" }
+        }))
+        .unwrap();
+        assert_eq!(back.id, None);
+    }
 }
