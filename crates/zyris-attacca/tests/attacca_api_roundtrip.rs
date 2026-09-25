@@ -202,6 +202,7 @@ impl AttaccaApi for StubApi {
     ) -> zyris::Result<Vec<ZSessionEvent>> {
         let all = vec![
             ZSessionEvent {
+                id: None,
                 seq: 1,
                 cursor: 1,
                 kind: "chat_user".into(),
@@ -209,6 +210,7 @@ impl AttaccaApi for StubApi {
                 created_at: Some("2026-07-29T00:00:00Z".into()),
             },
             ZSessionEvent {
+                id: None,
                 seq: 2,
                 cursor: 2,
                 kind: "chat_agent".into(),
@@ -388,6 +390,7 @@ impl AttaccaApi for StubApi {
             Ok(ZTurnFrame::Event {
                 cursor: 7,
                 event: ZSessionEvent {
+                    id: None,
                     seq: 1,
                     cursor: 7,
                     kind: "assistant_message".into(),
