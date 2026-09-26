@@ -9,7 +9,7 @@ use zyris::{Datum, Node, NodeKind, Streaming, Transfer};
 use zyris_attacca::{
     attacca_api_capability, AttaccaApi, AttaccaApiCancelTurnRequest, AttaccaApiClient,
     AttaccaApiPeerLookupRequest, AttaccaApiServer, ZAgent, ZDelivered, ZDeltaKind, ZHistoryQuery,
-    ZJob, ZJobFilter, ZJobState, ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewProject, ZNewSession,
+    ZJob, ZJobFilter, ZJobState, ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewMessage, ZNewProject, ZNewSession,
     ZNewWork, ZPeerAddr, ZPeerEntry, ZProject, ZProjectUpdate, ZScope, ZSession, ZSessionEvent,
     ZSessionFilter, ZTask, ZTaskDep, ZTaskState, ZTurnFrame, ZTurnStatus, ZUsage, ZWork,
     ZWorkFilter, ZWorkState, ZWorkTasks, ZWorkUpdate, ATTACCA_API_CAPABILITY,
@@ -248,6 +248,17 @@ impl AttaccaApi for StubApi {
         Ok(())
     }
 
+    // Stub: refuse anything but the agent the test names, so the client side can see the
+    // override arrived intact.
+    async fn send_message_with(&self, message: ZNewMessage) -> zyris::Result<()> {
+        match message.agent_id.as_deref() {
+            None | Some("agent-voice") => Ok(()),
+            Some(other) => Err(zyris::WireError::invalid_params(format!(
+                "unexpected agent {other}"
+            ))),
+        }
+    }
+
     // Stub: echo the delivery point back through an error so the client side can see it arrived
     // intact.
     async fn cancel_turn(
@@ -452,7 +463,7 @@ fn descriptor_matches_the_reserved_name() {
     let descriptor = attacca_api_capability();
     assert_eq!(descriptor.name, ATTACCA_API_CAPABILITY);
     assert_eq!(descriptor.version, 1);
-    assert_eq!(descriptor.tools.len(), 35);
+    assert_eq!(descriptor.tools.len(), 36);
     // A credential exists to create nodes, so nothing on this surface registers, lists or deletes
     // one any more. A deployment still serving these would be one this crate cannot call.
     for gone in ["register_node", "list_nodes", "delete_node"] {
@@ -581,6 +592,23 @@ async fn node_calls_the_unary_tools() {
 
     api.send_message("session-1".into(), "go".into(), vec![]).await.unwrap();
     api.cancel_turn("session-1".into(), None).await.unwrap();
+}
+
+#[tokio::test]
+async fn send_message_with_carries_the_agent_override() {
+    let api = client().await;
+    let message = |agent: Option<&str>| ZNewMessage {
+        session_id: "session-1".into(),
+        message: "go".into(),
+        agent_id: agent.map(str::to_string),
+    };
+    api.send_message_with(message(Some("agent-voice"))).await.unwrap();
+    api.send_message_with(message(None)).await.unwrap();
+    let refused = api
+        .send_message_with(message(Some("agent-main")))
+        .await
+        .unwrap_err();
+    assert!(refused.message.contains("agent-main"), "{refused:?}");
 }
 
 #[tokio::test]
