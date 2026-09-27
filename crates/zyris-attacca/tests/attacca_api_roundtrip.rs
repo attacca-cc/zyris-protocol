@@ -10,7 +10,7 @@ use zyris_attacca::{
     attacca_api_capability, AttaccaApi, AttaccaApiCancelTurnRequest, AttaccaApiClient,
     AttaccaApiPeerLookupRequest, AttaccaApiServer, ZAgent, ZDelivered, ZDeltaKind, ZHistoryQuery,
     ZJob, ZJobFilter, ZJobState, ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewMessage, ZNewProject, ZNewSession,
-    ZNewWork, ZPeerAddr, ZPeerEntry, ZProject, ZProjectUpdate, ZScope, ZSession, ZSessionEvent,
+    ZNewWork, ZFileOffered, ZPeerAddr, ZPeerEntry, ZPeerKind, ZProject, ZProjectUpdate, ZScope, ZSession, ZSessionEvent,
     ZSessionFilter, ZTask, ZTaskDep, ZTaskState, ZTurnFrame, ZTurnStatus, ZUsage, ZWork,
     ZWorkFilter, ZWorkState, ZWorkTasks, ZWorkUpdate, ATTACCA_API_CAPABILITY,
 };
@@ -439,7 +439,21 @@ impl AttaccaApi for StubApi {
             path: "laptop/zyris-code/myrepo".into(),
             endpoint_id: "ed25519:sibling-endpoint".into(),
             online: true,
+            kind: ZPeerKind::Node,
         }])
+    }
+
+    async fn peer_relay(&self) -> zyris::Result<Option<String>> {
+        Ok(Some("https://relay.attacca.cc".into()))
+    }
+
+    async fn request_file(&self, _file_id: String) -> zyris::Result<ZFileOffered> {
+        Ok(ZFileOffered {
+            transfer_id: "t-1".into(),
+            name: "report.md".into(),
+            size: 3,
+            sha256: "0".repeat(64),
+        })
     }
 }
 
@@ -463,7 +477,7 @@ fn descriptor_matches_the_reserved_name() {
     let descriptor = attacca_api_capability();
     assert_eq!(descriptor.name, ATTACCA_API_CAPABILITY);
     assert_eq!(descriptor.version, 1);
-    assert_eq!(descriptor.tools.len(), 36);
+    assert_eq!(descriptor.tools.len(), 38);
     // A credential exists to create nodes, so nothing on this surface registers, lists or deletes
     // one any more. A deployment still serving these would be one this crate cannot call.
     for gone in ["register_node", "list_nodes", "delete_node"] {
@@ -501,7 +515,13 @@ fn descriptor_matches_the_reserved_name() {
 #[test]
 fn rendezvous_tools_are_in_the_descriptor() {
     let descriptor = attacca_api_capability();
-    for name in ["peer_publish", "peer_lookup", "peer_list"] {
+    for name in [
+        "peer_publish",
+        "peer_lookup",
+        "peer_list",
+        "peer_relay",
+        "request_file",
+    ] {
         let tool = descriptor.tool(name).unwrap_or_else(|| panic!("{name} is missing"));
         assert_eq!(tool.transfer, Transfer::Unary, "{name}");
     }
@@ -1064,4 +1084,13 @@ fn peer_entry_rejects_a_missing_required_field() {
         "online": true,
     });
     assert!(serde_json::from_value::<ZPeerEntry>(still_a_slug).is_err());
+}
+
+#[tokio::test]
+async fn peer_relay_and_request_file_cross_the_wire() {
+    let api = client().await;
+    assert_eq!(api.peer_relay().await.unwrap().as_deref(), Some("https://relay.attacca.cc"));
+    let offered = api.request_file("f-1".into()).await.unwrap();
+    assert_eq!(offered.transfer_id, "t-1");
+    assert_eq!(offered.size, 3);
 }

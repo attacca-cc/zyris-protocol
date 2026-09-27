@@ -173,6 +173,12 @@ impl AttaccaApi for StubRendezvous {
     async fn peer_list(&self) -> Result<Vec<ZPeerEntry>> {
         unused()
     }
+    async fn peer_relay(&self) -> Result<Option<String>> {
+        unused()
+    }
+    async fn request_file(&self, _file_id: String) -> Result<zyris_attacca::ZFileOffered> {
+        unused()
+    }
 }
 
 /// A live `AttaccaApiClient` whose `peer_lookup` gives back `answer`.

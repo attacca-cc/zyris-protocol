@@ -43,6 +43,7 @@ fn entry(path: &str, endpoint_id: &str) -> ZPeerEntry {
         path: path.to_string(),
         endpoint_id: endpoint_id.to_string(),
         online: true,
+        kind: zyris_attacca::ZPeerKind::Node,
     }
 }
 
