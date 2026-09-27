@@ -19,7 +19,7 @@ use std::time::Duration;
 use zyris::{Chunk, Datum, ErrorCode, Node, NodeKind, Result, Streaming, WireError};
 use zyris_attacca::{
     AttaccaApi, AttaccaApiClient, AttaccaApiServer, ZAgent, ZDelivered, ZHistoryQuery, ZJob,
-    ZJobFilter, ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewProject, ZNewSession, ZNewWork, ZPeerAddr,
+    ZJobFilter, ZJobUpdate, ZMe, ZNewAgent, ZNewJob, ZNewMessage, ZNewProject, ZNewSession, ZNewWork, ZPeerAddr,
     ZPeerEntry, ZProject, ZProjectUpdate, ZSession, ZSessionEvent, ZSessionFilter, ZTurnFrame,
     ZTurnStatus, ZUsage, ZWork, ZWorkFilter, ZWorkTasks, ZWorkUpdate,
 };
@@ -104,6 +104,9 @@ impl AttaccaApi for StubRendezvous {
         unused()
     }
     async fn send_message(&self, _s: String, _m: String, _d: Vec<Datum>) -> Result<()> {
+        unused()
+    }
+    async fn send_message_with(&self, _message: ZNewMessage) -> Result<()> {
         unused()
     }
     async fn cancel_turn(&self, _session_id: String, _delivered: Option<ZDelivered>) -> Result<()> {

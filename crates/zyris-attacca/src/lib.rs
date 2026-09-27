@@ -287,6 +287,21 @@ pub struct ZNewSession {
     pub preamble: Option<String>,
 }
 
+/// What [`AttaccaApi::send_message_with`] takes: a message, and optionally the agent that answers
+/// it. A struct for the reason [`ZNewSession`] is one — a new field defaults, a new argument on an
+/// existing tool is a decode error for every node built before it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZNewMessage {
+    pub session_id: String,
+    pub message: String,
+    /// The agent that answers this one message, in place of the session's own — the per-message
+    /// override the web app's agent picker sends. Omit to keep the session's agent. A voice node
+    /// uses it so that whichever session a person picked, the answer comes from an agent written
+    /// to be read aloud.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+}
+
 /// The window [`AttaccaApi::session_history`] reads. Every field defaults, so the whole timeline is
 /// `ZHistoryQuery::default()`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -782,6 +797,14 @@ pub trait AttaccaApi {
         message: String,
         data: Vec<Datum>,
     ) -> zyris::Result<()>;
+
+    /// [`AttaccaApi::send_message`], with the options added since — most usefully an agent that
+    /// answers this message in place of the session's own. Carries no data: a message with files
+    /// goes through `send_message`.
+    ///
+    /// Added within version 1, so an older deployment answers `capability_not_announced` or an
+    /// unknown-tool error; a node falls back to `send_message` and the session's agent.
+    async fn send_message_with(&self, message: ZNewMessage) -> zyris::Result<()>;
 
     /// Stop the running turn on a session, and keep only what the person got.
     ///
