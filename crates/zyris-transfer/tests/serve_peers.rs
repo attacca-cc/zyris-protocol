@@ -43,6 +43,7 @@ fn entry(path: &str, endpoint_id: &str) -> ZPeerEntry {
         path: path.to_string(),
         endpoint_id: endpoint_id.to_string(),
         online: true,
+        kind: zyris_attacca::ZPeerKind::Node,
     }
 }
 
@@ -178,6 +179,63 @@ async fn a_node_of_this_account_is_accepted_and_its_file_arrives() {
     assert!(written.ends_with("report.pdf"), "{written}");
     let landed = listener.inbox.path().join("laptop").join("report.pdf");
     assert_eq!(tokio::fs::read(&landed).await.unwrap(), b"over quic");
+}
+
+/// What attacca does with a chat artifact: offer bytes that are not a file on its machine. They
+/// arrive whole, and the sender still serves nothing it did not offer.
+#[tokio::test]
+async fn offered_bytes_arrive_whole_and_only_the_offered_id_is_served() {
+    let from = Peer::new().await;
+    let listener = Listener::start(vec![entry("attacca", &from.id.to_string())]).await;
+    let root = tempfile::tempdir().unwrap();
+
+    let body = bytes::Bytes::from_static(b"report body");
+    let sha = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&body));
+    let id = zyris_transfer::transfer_id("attacca", "report.md", body.len() as u64, &sha);
+    let sender = LocalPeerTransfer::sender(root.path().to_path_buf());
+    sender.offer_bytes(id.clone(), body.clone(), sha.clone()).await;
+
+    let done = tokio::time::timeout(Duration::from_secs(30), async {
+        let transport = zyris_p2p::peer::dial(&from.endpoint, listener.peer.addr()).await.unwrap();
+        let node = Node::builder()
+            .name("attacca")
+            .kind(NodeKind::Service)
+            .capability(PeerTransferServer(sender.clone()))
+            .build()
+            .unwrap();
+        let connection = node.connect_over(transport).await.unwrap();
+        let client: PeerTransferClient =
+            connection.wait_capability(Duration::from_secs(5)).await.unwrap();
+        client
+            .push_offer(TransferOffer {
+                transfer_id: id.clone(),
+                name: "report.md".to_string(),
+                size: body.len() as u64,
+                sha256: sha.clone(),
+                overwrite: false,
+            })
+            .await
+    })
+    .await
+    .expect("the transfer should not need 30s on loopback")
+    .expect("offered bytes should be taken");
+
+    assert_eq!(done.sha256, sha);
+    assert_eq!(done.bytes, 11);
+    let landed = listener.inbox.path().join("attacca").join("report.md");
+    assert_eq!(tokio::fs::read(&landed).await.unwrap(), b"report body");
+
+    // A resume reads from its offset, and one past the end reads nothing, as a file does.
+    for (offset, rest) in [(7u64, &b"body"[..]), (99, &b""[..])] {
+        let pulled = sender.pull(id.clone(), offset).await.unwrap();
+        let chunks: Vec<_> = futures_util::StreamExt::collect(pulled.items).await;
+        let got: Vec<u8> = chunks.into_iter().flat_map(|c| c.unwrap().0.to_vec()).collect();
+        assert_eq!(got, rest, "offset {offset}");
+    }
+
+    // Anyone asking for an id that was never offered gets nothing, over this or any connection.
+    let refused = sender.pull("not-offered".to_string(), 0).await.err().expect("not offered");
+    assert_eq!(refused.code, zyris::ErrorCode::InvalidParams);
 }
 
 /// The guard the whole lookup exists for. A stranger must be closed *before* a zyris handshake —

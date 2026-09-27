@@ -89,7 +89,7 @@ pub use peer::{InFlight, LocalPeerTransfer, TRANSFER_IN_FLIGHT, TransferConfig, 
 pub use rendezvous::Rendezvous;
 #[cfg(feature = "send")]
 pub use send::{
-    FileTransferConfig, IrohPeerLink, LocalFileTransfer, PeerLink, PeerSession,
-    DEFAULT_WIRE_DEADLINE,
+    dialable, transfer_id, FileTransferConfig, IrohPeerLink, LocalFileTransfer, PeerLink,
+    PeerSession, DEFAULT_WIRE_DEADLINE,
 };
 pub use undo::UndoStore;

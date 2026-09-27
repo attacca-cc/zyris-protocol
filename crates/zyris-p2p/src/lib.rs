@@ -6,6 +6,7 @@
 //! fits.
 
 pub mod fingerprint;
+pub mod endpoint;
 pub mod frame;
 pub mod key;
 pub mod peer;

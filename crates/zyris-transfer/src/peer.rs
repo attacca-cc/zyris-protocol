@@ -181,9 +181,16 @@ impl Default for TransferConfig {
 #[derive(Clone)]
 struct ToSend {
     transfer_id: String,
-    path: PathBuf,
+    source: Source,
     size: u64,
     sha256: String,
+}
+
+/// Where an offered transfer's bytes come from.
+#[derive(Clone)]
+enum Source {
+    Path(PathBuf),
+    Bytes(Bytes),
 }
 
 /// **The handle is plugged in later.** For the receiving side to call `pull` back, it needs a
@@ -249,7 +256,14 @@ impl LocalPeerTransfer {
     /// Reserves what the sending side will hand out. `send_to` calls this right before
     /// `push_offer`.
     pub async fn offer_file(&self, transfer_id: String, path: PathBuf, size: u64, sha256: String) {
-        self.pending.lock().await.push(ToSend { transfer_id, path, size, sha256 });
+        self.pending.lock().await.push(ToSend { transfer_id, source: Source::Path(path), size, sha256 });
+    }
+
+    /// Offer bytes that are not a file on this machine — attacca serving a chat artifact. Same
+    /// contract as `offer_file`: only an offered `transfer_id` is ever served, from any `offset`.
+    pub async fn offer_bytes(&self, transfer_id: String, bytes: Bytes, sha256: String) {
+        let size = bytes.len() as u64;
+        self.pending.lock().await.push(ToSend { transfer_id, source: Source::Bytes(bytes), size, sha256 });
     }
 }
 
@@ -504,13 +518,26 @@ impl PeerTransfer for LocalPeerTransfer {
 
         let head = PullHead { size: to_send.size, sha256: to_send.sha256.clone() };
 
+        let path = match to_send.source {
+            Source::Path(path) => path,
+            // An offset past the end yields an empty stream, as seeking past a file's end does
+            // below; the receiver's size and sha256 checks are what catch it.
+            Source::Bytes(bytes) => {
+                let start = usize::try_from(offset).unwrap_or(usize::MAX).min(bytes.len());
+                let chunks = (start..bytes.len()).step_by(CHUNK_SIZE).map(move |at| {
+                    Ok(Chunk(bytes.slice(at..(at + CHUNK_SIZE).min(bytes.len()))))
+                });
+                return Ok(Streaming::new(head, futures_util::stream::iter(chunks)));
+            }
+        };
+
         // The file is opened outside the stream — a file that cannot be opened has to be "the
         // call itself failed", not an error partway through the stream. The `done` flag carried
         // in `unfold`'s state plays the same role as `file_io.rs::read_stream`'s
         // `remaining = Some(0)`: without returning `None` on the next poll after emitting one
         // error, the same error would be emitted forever.
         use tokio::io::{AsyncReadExt, AsyncSeekExt};
-        let mut file = tokio::fs::File::open(&to_send.path).await.map_err(io_error)?;
+        let mut file = tokio::fs::File::open(&path).await.map_err(io_error)?;
         if offset > 0 {
             file.seek(std::io::SeekFrom::Start(offset)).await.map_err(io_error)?;
         }

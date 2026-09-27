@@ -717,6 +717,30 @@ pub struct ZPeerEntry {
     pub path: String,
     pub endpoint_id: String,
     pub online: bool,
+    /// What the entry is. `Server` is attacca's own endpoint, which offers chat artifacts
+    /// (`request_file`, an agent's send). A node accepts offers from either kind; a node UI should not
+    /// show a `Server` entry as one of the person's machines, and nothing should be pinned under its
+    /// path. Absent from a server that predates the field, which only ever listed nodes.
+    #[serde(default)]
+    pub kind: ZPeerKind,
+}
+
+/// What a [`ZPeerEntry`] is: one of the account's nodes, or attacca's own endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZPeerKind {
+    #[default]
+    Node,
+    Server,
+}
+
+/// [`AttaccaApi::request_file`]'s answer: the offer attacca made over the peer link.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ZFileOffered {
+    pub transfer_id: String,
+    pub name: String,
+    pub size: u64,
+    pub sha256: String,
 }
 
 #[zyris::capability(name = "attacca_api", version = 1)]
@@ -911,11 +935,45 @@ pub trait AttaccaApi {
     /// List the nodes on the same account. Used to decide whether an incoming connection may be
     /// accepted. `peers:write`.
     async fn peer_list(&self) -> zyris::Result<Vec<ZPeerEntry>>;
+
+    /// attacca's own iroh relay, the one relay a zyris endpoint should use — build the endpoint with
+    /// `zyris_p2p::endpoint::private_endpoint(secret, relay)`. `None` when this deployment runs none,
+    /// in which case peers connect directly or not at all. `peers:write`.
+    async fn peer_relay(&self) -> zyris::Result<Option<String>>;
+
+    /// Have attacca offer a chat file to the calling node over the peer link. attacca dials this
+    /// node's published peer address, offers the file, and the node pulls it into its inbox the way it
+    /// receives from any peer; this returns once the offer was taken. Refused for a connection that is
+    /// not a node, or a node that has not published a peer address. `files:read`.
+    async fn request_file(&self, file_id: String) -> zyris::Result<ZFileOffered>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_peer_entry_without_kind_is_a_node() {
+        let entry: ZPeerEntry = serde_json::from_value(serde_json::json!({
+            "node_id": "n", "path": "a/b/c", "endpoint_id": "e", "online": true
+        }))
+        .unwrap();
+        assert_eq!(entry.kind, ZPeerKind::Node);
+    }
+
+    #[test]
+    fn a_server_peer_entry_round_trips() {
+        let entry = ZPeerEntry {
+            node_id: "s".into(),
+            path: "attacca/server/pod-1".into(),
+            endpoint_id: "e".into(),
+            online: true,
+            kind: ZPeerKind::Server,
+        };
+        let wire = serde_json::to_value(&entry).unwrap();
+        assert_eq!(wire["kind"], "server");
+        assert_eq!(serde_json::from_value::<ZPeerEntry>(wire).unwrap(), entry);
+    }
 
     #[test]
     fn a_session_event_round_trips_its_id() {
