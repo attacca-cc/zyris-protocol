@@ -673,7 +673,7 @@ impl FileTransfer for LocalFileTransfer {
 /// The receiving side's path is deliberately not an ingredient: the destination is the receiver's
 /// choice, so the sender cannot know it before asking, and a retry has to produce the same id
 /// *before* anything is asked.
-fn transfer_id(node_id: &str, name: &str, size: u64, sha256: &str) -> String {
+pub fn transfer_id(node_id: &str, name: &str, size: u64, sha256: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(node_id.as_bytes());
     hasher.update([0]);
@@ -724,9 +724,39 @@ fn refuse(code: &str, message: String) -> WireError {
     WireError::new(ErrorCode::Other(code.to_string()), message).retriable(false)
 }
 
+/// `addr` with every relay URL except `ours` removed, so a peer that published a public relay is
+/// dialled on its direct addresses only.
+pub fn dialable(addr: &ZPeerAddr, ours: Option<&str>) -> ZPeerAddr {
+    let mut addr = addr.clone();
+    if addr.relay_url.as_deref() != ours {
+        addr.relay_url = None;
+    }
+    addr
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn addr(relay: Option<&str>) -> ZPeerAddr {
+        ZPeerAddr {
+            node_id: "n".into(),
+            path: "a/b/c".into(),
+            endpoint_id: "e".into(),
+            addrs: vec!["192.0.2.1:7000".into()],
+            relay_url: relay.map(Into::into),
+            online: true,
+        }
+    }
+
+    #[test]
+    fn dialable_drops_a_foreign_relay() {
+        let ours = Some("https://relay.attacca.cc");
+        assert_eq!(dialable(&addr(Some("https://use1-1.relay.n0.iroh.iroh.link")), ours).relay_url, None);
+        assert_eq!(dialable(&addr(ours), ours).relay_url.as_deref(), ours);
+        assert_eq!(dialable(&addr(ours), None).relay_url, None);
+        assert_eq!(dialable(&addr(None), ours).addrs, ["192.0.2.1:7000"]);
+    }
 
     #[test]
     fn the_same_arguments_always_name_the_same_transfer() {
