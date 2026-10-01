@@ -281,8 +281,7 @@ pub struct ZNewSession {
     pub project_id: Option<String>,
     /// System instructions for this session alone, appended to the agent's own preamble on every
     /// turn — the agent keeps its identity, tools and skills, and this narrows what it is doing
-    /// here. Fixed for the session's lifetime; a node wanting different instructions opens a
-    /// different session.
+    /// here. Change it later with [`AttaccaApi::update_session_preamble`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preamble: Option<String>,
 }
@@ -796,6 +795,19 @@ pub trait AttaccaApi {
     /// system instructions on top of its agent's. Leave `title` unset unless the node has a name
     /// worth pinning; Attacca titles the session from its first message otherwise.
     async fn create_session_with(&self, session: ZNewSession) -> zyris::Result<ZSession>;
+
+    /// Replace a session's preamble, or clear it with `None`. Takes effect from the next turn: the
+    /// preamble is read per turn, so a turn already running keeps the one it started with. This is
+    /// how a node installs or retunes standing instructions on a session it did not create.
+    /// Requires `sessions:write`.
+    ///
+    /// Added within version 1, so an older deployment answers `capability_not_announced` or an
+    /// unknown-tool error; a node falls back to opening a new session with `create_session_with`.
+    async fn update_session_preamble(
+        &self,
+        session_id: String,
+        preamble: Option<String>,
+    ) -> zyris::Result<ZSession>;
 
     /// A session's durable timeline, oldest-first: the same events `turn_events` streams, read back
     /// as a list, so a node that was not connected when they happened can still see them. Mind the
