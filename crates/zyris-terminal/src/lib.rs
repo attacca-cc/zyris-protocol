@@ -344,9 +344,10 @@ const POLL_MAX_INTERVAL_SECS: u64 = 10;
 const POLL_DEFAULT_TIMEOUT_SECS: u64 = 300;
 const POLL_MAX_TIMEOUT_SECS: u64 = 600;
 
-/// Characters of one attempt's output kept before the next attempt starts. Bounds what a chatty
-/// command adds to the result per attempt.
-const POLL_ATTEMPT_OUTPUT_CHARS: usize = 4_000;
+/// Characters of one attempt's output kept before the next attempt starts. It matches the ceiling
+/// `max_output_chars` advertises — a lower cap here would make that ceiling unreachable — and the
+/// accumulated cap below is what actually bounds a poll of many attempts.
+const POLL_ATTEMPT_OUTPUT_CHARS: usize = POLL_MAX_OUTPUT_CHARS;
 
 /// The most output a poll carries internally, and the default and ceiling for what it hands back.
 /// Only the tail is kept: what a poll is watched for is at the end of what its command printed.
@@ -428,8 +429,11 @@ impl PtyTerminal {
             // argv mode: no shell is involved. Arguments go straight to the program, so no
             // escaping is needed — this is what makes PowerShell's gnarly quoting rules moot.
             Some(argv) => {
-                let mut c = Command::new(&argv[0]);
-                c.args(&argv[1..]);
+                let (program, args) = argv
+                    .split_first()
+                    .ok_or_else(|| WireError::invalid_params("argv must not be empty"))?;
+                let mut c = Command::new(program);
+                c.args(args);
                 c
             }
             None => {
@@ -464,6 +468,9 @@ impl PtyTerminal {
         // tree can be killed (including any grandchildren the shell left behind).
         #[cfg(unix)]
         cmd.process_group(0);
+        // A cancelled call drops the future, and with it this `Child`. Without this the process
+        // would be left running with nobody reading its pipes.
+        cmd.kill_on_drop(true);
 
         let mut child = cmd.spawn().map_err(pty_err)?;
         let pid = child.id();
@@ -680,7 +687,10 @@ impl Terminal for PtyTerminal {
         let mut attempts: u32 = 0;
         let mut accumulated = String::new();
         let mut dropped = false;
-        let mut exit_code: i32 = -1;
+        // The last attempt that finished, in either direction. A killed attempt is not an answer
+        // about the command, so its -1 never becomes the reported exit code while anything else
+        // completed.
+        let mut last_completed: Option<i32> = None;
         let mut timed_out = false;
         let mut met = false;
 
@@ -703,8 +713,10 @@ impl Terminal for PtyTerminal {
                     timeout: Some(left),
                 })
                 .await?;
-            exit_code = out.exit_code;
             timed_out = out.timed_out;
+            if !out.timed_out {
+                last_completed = Some(out.exit_code);
+            }
 
             dropped |= push_capped(
                 &mut accumulated,
@@ -732,7 +744,9 @@ impl Terminal for PtyTerminal {
             }
             dropped |= push_capped(&mut accumulated, &body, POLL_ACCUMULATED_CAP);
 
-            if out.exit_code as i64 == success_exit {
+            // A killed attempt has no exit code of its own — the -1 is ours — so it never matches
+            // `success_exit_code`, whatever that was set to.
+            if !out.timed_out && out.exit_code as i64 == success_exit {
                 met = true;
                 break;
             }
@@ -755,10 +769,27 @@ impl Terminal for PtyTerminal {
             met,
             attempts,
             elapsed_ms: start.elapsed().as_millis() as u64,
-            exit_code,
+            exit_code: last_completed.unwrap_or(-1),
             timed_out,
             output: tail_chars(&accumulated, max_chars),
             output_truncated: truncated,
         })
+    }
+}
+
+/// The declared `#[zyris(limit = 620)]` on `poll` is a literal the attribute macro needs, so it
+/// cannot be written as an expression of `POLL_MAX_TIMEOUT_SECS`. This is what keeps the two from
+/// drifting apart: the node's own deadline has to fire before the caller's does.
+#[cfg(test)]
+mod poll_budget_tests {
+    #[test]
+    fn the_declared_call_window_clears_the_poll_budget() {
+        let declared_secs: u64 = 620;
+        assert!(
+            super::POLL_MAX_TIMEOUT_SECS + 5 <= declared_secs,
+            "the declared call window ({declared_secs}s) does not clear the budget ceiling ({}s) plus a \
+             relay hop",
+            super::POLL_MAX_TIMEOUT_SECS
+        );
     }
 }

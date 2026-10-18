@@ -38,14 +38,17 @@ pub struct PollResult {
     pub met: bool,
     /// How many times the command ran. Always at least 1 — the first attempt starts immediately.
     pub attempts: u32,
-    /// Wall-clock time the poll spent, from the first attempt to the last.
+    /// Wall-clock time the poll spent, up to the moment it returned.
     pub elapsed_ms: u64,
-    /// The last attempt's exit code, or -1 when that attempt was killed for outliving the budget.
+    /// The exit code of the last attempt that **finished**, in either direction. A killed attempt
+    /// has no exit code of its own, so it never overwrites this one — `-1` only when no attempt
+    /// finished at all.
     pub exit_code: i32,
-    /// True when the last attempt was killed at the deadline instead of finishing on its own.
+    /// True when the final attempt was killed at the deadline instead of finishing on its own.
     pub timed_out: bool,
     /// Every attempt's output, oldest first: a `--- attempt N  t=<secs>  exit <code> ---` header
-    /// followed by that attempt's stdout and stderr. The head is trimmed to `max_output_chars`.
+    /// followed by that attempt's stdout and stderr. Each attempt is tail-trimmed to
+    /// `max_output_chars`, and the head of the whole is dropped when it exceeds that.
     pub output: String,
     /// True when output was cut to fit — an attempt's own output past its cap, or earlier
     /// attempts dropped to stay under the result cap.
@@ -221,6 +224,10 @@ pub trait Terminal {
     /// attempt's combined stdout and stderr contain that substring. Either one ends the poll with
     /// `met: true`. A nonzero exit on its own is not an error — it is the answer "not yet", which is
     /// the whole point of polling.
+    ///
+    /// A killed attempt counts only for the output half: the substring did appear, so the condition
+    /// was met, and the result says `timed_out: true` beside `met: true`. Its exit code is the one
+    /// the timeout produced, never the command's, so it can never satisfy `success_exit_code`.
     ///
     /// **What to run.** Exactly one of `command` or `argv`, with the same meaning and the same
     /// quoting rules as [`Terminal::exec`]: `command` is a shell one-liner, `argv` is the
