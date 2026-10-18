@@ -8,7 +8,10 @@ One type, `PtyTerminal`. It spawns a shell behind a real pseudo-terminal with `p
 that shell's output in a per-session ring buffer, and feeds the same bytes to a `vt100` screen
 model — so `read` returns the stream while `screen` renders the grid, and neither consumes the
 other. `exec` is the one-shot side: no PTY, a bounded run, and on timeout the whole process tree
-goes, not just the shell.
+goes, not just the shell. `poll` is `exec` repeated until a check passes — the node-side counterpart
+of Attacca's `computer_terminal_poll`: an attempt every `interval_secs` until it succeeds or the
+budget runs out, every attempt's output kept, and an attempt that hangs killed at the deadline
+rather than waited on.
 
 ```toml
 [dependencies]
