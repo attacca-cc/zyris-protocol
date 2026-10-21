@@ -103,6 +103,9 @@ impl AttaccaApi for StubRendezvous {
     async fn session_usage(&self, _session_id: String) -> Result<ZUsage> {
         unused()
     }
+    async fn update_session_preamble(&self, _s: String, _p: Option<String>) -> Result<ZSession> {
+        unused()
+    }
     async fn send_message(&self, _s: String, _m: String, _d: Vec<Datum>) -> Result<()> {
         unused()
     }

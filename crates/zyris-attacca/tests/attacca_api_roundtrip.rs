@@ -259,6 +259,22 @@ impl AttaccaApi for StubApi {
         }
     }
 
+    // Stub: hand the new preamble straight back so the client side can see both a set and a clear arrive.
+    async fn update_session_preamble(
+        &self,
+        session_id: String,
+        preamble: Option<String>,
+    ) -> zyris::Result<ZSession> {
+        Ok(ZSession {
+            id: session_id,
+            title: None,
+            agent_id: Some("agent-1".into()),
+            project_id: None,
+            running: false,
+            preamble,
+        })
+    }
+
     // Stub: echo the delivery point back through an error so the client side can see it arrived
     // intact.
     async fn cancel_turn(
@@ -477,7 +493,7 @@ fn descriptor_matches_the_reserved_name() {
     let descriptor = attacca_api_capability();
     assert_eq!(descriptor.name, ATTACCA_API_CAPABILITY);
     assert_eq!(descriptor.version, 1);
-    assert_eq!(descriptor.tools.len(), 38);
+    assert_eq!(descriptor.tools.len(), 39);
     // A credential exists to create nodes, so nothing on this surface registers, lists or deletes
     // one any more. A deployment still serving these would be one this crate cannot call.
     for gone in ["register_node", "list_nodes", "delete_node"] {
@@ -664,6 +680,21 @@ async fn create_session_with_carries_a_preamble() {
     // The older three-argument tool still works and leaves the preamble unset.
     let plain = api.create_session("agent-1".into(), None, None).await.unwrap();
     assert_eq!(plain.preamble, None);
+}
+
+#[tokio::test]
+async fn update_session_preamble_sets_and_clears() {
+    let api = client().await;
+
+    let set = api
+        .update_session_preamble("session-1".into(), Some("Be brief.".into()))
+        .await
+        .unwrap();
+    assert_eq!(set.id, "session-1");
+    assert_eq!(set.preamble.as_deref(), Some("Be brief."));
+
+    let cleared = api.update_session_preamble("session-1".into(), None).await.unwrap();
+    assert_eq!(cleared.preamble, None);
 }
 
 #[tokio::test]
