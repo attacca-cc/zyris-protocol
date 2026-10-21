@@ -30,6 +30,31 @@ pub struct ExecOutput {
     pub stderr_truncated: bool,
 }
 
+/// What one [`Terminal::poll`] call reports.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PollResult {
+    /// Whether the condition was met before the budget ran out. `false` is a complete answer
+    /// rather than a failure: the check was tried for the whole budget and never succeeded.
+    pub met: bool,
+    /// How many times the command ran. Always at least 1 — the first attempt starts immediately.
+    pub attempts: u32,
+    /// Wall-clock time the poll spent, up to the moment it returned.
+    pub elapsed_ms: u64,
+    /// The exit code of the last attempt that **finished**, in either direction. A killed attempt
+    /// has no exit code of its own, so it never overwrites this one — `-1` only when no attempt
+    /// finished at all.
+    pub exit_code: i32,
+    /// True when the final attempt was killed at the deadline instead of finishing on its own.
+    pub timed_out: bool,
+    /// Every attempt's output, oldest first: a `--- attempt N  t=<secs>  exit <code> ---` header
+    /// followed by that attempt's stdout and stderr. Each attempt is tail-trimmed to
+    /// `max_output_chars`, and the head of the whole is dropped when it exceeds that.
+    pub output: String,
+    /// True when output was cut to fit — an attempt's own output past its cap, or earlier
+    /// attempts dropped to stay under the result cap.
+    pub output_truncated: bool,
+}
+
 /// What bounds a `read` or `screen` call: how long the PTY must be quiet before the reply goes
 /// out, and how long to wait at most.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -185,4 +210,54 @@ pub trait Terminal {
         env: Option<std::collections::HashMap<String, String>>,
         shell: Option<String>,
     ) -> zyris::Result<ExecOutput>;
+
+    /// Run a command over and over until it succeeds or the budget runs out — the node's
+    /// counterpart of Attacca's `computer_terminal_poll`.
+    ///
+    /// One attempt is one [`Terminal::exec`]: the command runs to completion, and the next starts
+    /// `interval_secs` later. The first attempt runs immediately. An attempt still running when the
+    /// budget is spent is killed (whole process tree) and reported with `timed_out`, so a hung
+    /// command cannot outlive its poll.
+    ///
+    /// **What counts as success.** An attempt succeeds when its exit code equals
+    /// `success_exit_code` (default 0) or, when `success_output_contains` is given, when the
+    /// attempt's combined stdout and stderr contain that substring. Either one ends the poll with
+    /// `met: true`. A nonzero exit on its own is not an error — it is the answer "not yet", which is
+    /// the whole point of polling.
+    ///
+    /// A killed attempt counts only for the output half: the substring did appear, so the condition
+    /// was met, and the result says `timed_out: true` beside `met: true`. Its exit code is the one
+    /// the timeout produced, never the command's, so it can never satisfy `success_exit_code`.
+    ///
+    /// **What to run.** Exactly one of `command` or `argv`, with the same meaning and the same
+    /// quoting rules as [`Terminal::exec`]: `command` is a shell one-liner, `argv` is the
+    /// escaping-free path. `cwd`, `env` and `shell` mean what they mean there. `stdin` is absent
+    /// because a poll repeats one non-interactive check.
+    ///
+    /// **Bounds.** `interval_secs` defaults to 5 and is clamped to 1..=10 — an attempt is a cheap
+    /// command, so a longer interval buys nothing but a later sight of a condition that was already
+    /// true. `timeout_secs` defaults to 300 and is clamped to 1..=600; the loop enforces it on the
+    /// node, so the poll stops on its own even if the caller has gone away. There is no background
+    /// hand-off: unlike `computer_terminal_poll`, which returns a job id and lets the turn continue
+    /// when it outlives it, this is one blocking call for its whole budget.
+    ///
+    /// **The answer.** [`PollResult`] carries `met`, how many `attempts` it took, the last attempt's
+    /// exit code, and the accumulated output of every attempt (tail-trimmed to `max_output_chars`,
+    /// default 4000, clamped to 200..=40000). A poll that never succeeded still reports what its
+    /// attempts printed, which is usually the only thing that says why.
+    #[allow(clippy::too_many_arguments)]
+    #[zyris(limit = 620)]
+    async fn poll(
+        &self,
+        command: Option<String>,
+        argv: Option<Vec<String>>,
+        cwd: Option<String>,
+        env: Option<std::collections::HashMap<String, String>>,
+        shell: Option<String>,
+        interval_secs: Option<u64>,
+        timeout_secs: Option<u64>,
+        success_exit_code: Option<i64>,
+        success_output_contains: Option<String>,
+        max_output_chars: Option<u32>,
+    ) -> zyris::Result<PollResult>;
 }

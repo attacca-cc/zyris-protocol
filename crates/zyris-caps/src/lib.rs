@@ -48,7 +48,8 @@ pub use screen::{
     Region, ScreenCapture, ScreenCaptureClient, ScreenCaptureServer,
 };
 pub use terminal::{
-    terminal_capability, ExecOutput, PtyChunk, PtyId, PtyOpened, PtyRead, PtyScreen, Settle,
+    terminal_capability, ExecOutput, PollResult, PtyChunk, PtyId, PtyOpened, PtyRead, PtyScreen,
+    Settle,
     Terminal, TerminalClient, TerminalServer,
 };
 
@@ -102,5 +103,42 @@ mod call_limit_tests {
         let watch = descriptor.tool("watch").expect("tool is announced");
         assert_eq!(watch.transfer, zyris::Transfer::UniStream, "the mode still applies");
         assert_eq!(watch.call_limit, Some(CallLimit::Unlimited));
+    }
+}
+
+/// The `poll` tool's declaration, checked where the capability is declared rather than where it is
+/// implemented: a node that implements the trait but forgets the limit would have its poll killed
+/// by the caller's default call timeout long before its own budget ran out.
+#[cfg(test)]
+mod poll_declaration_tests {
+    use zyris::CallLimit;
+
+    #[test]
+    fn poll_declares_a_call_window_long_enough_for_its_own_budget() {
+        let descriptor = crate::terminal_capability();
+        let poll = descriptor.tool("poll").expect("terminal announces poll");
+        assert_eq!(poll.call_limit, Some(CallLimit::Secs(620)));
+    }
+
+    /// The arguments the tool documents have to reach the wire, or an agent cannot pass them at all.
+    #[test]
+    fn poll_announces_every_argument_it_takes() {
+        let descriptor = crate::terminal_capability();
+        let poll = descriptor.tool("poll").expect("terminal announces poll");
+        let properties = &poll.request_schema["properties"];
+        for key in [
+            "command",
+            "argv",
+            "cwd",
+            "env",
+            "shell",
+            "interval_secs",
+            "timeout_secs",
+            "success_exit_code",
+            "success_output_contains",
+            "max_output_chars",
+        ] {
+            assert!(properties.get(key).is_some(), "`{key}` is missing from the schema: {properties}");
+        }
     }
 }
