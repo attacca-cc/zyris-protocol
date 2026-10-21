@@ -16,7 +16,7 @@ use zyris_attacca::{
 };
 use zyris_attacca::{
     ZAutoHandover, ZChatMessage, ZFollowedUp, ZGoal, ZGoalDetail, ZGoalState, ZGoalUpdate,
-    ZHumanTask, ZHumanTaskResolution, ZHumanTaskState, ZJobFollowedUp, ZMilestone,
+    ZHumanTask, ZHumanTaskResolution, ZJobScope, ZHumanTaskState, ZJobFollowedUp, ZMilestone,
     ZMilestoneState, ZMilestoneUpdate, ZNewHumanTask, ZNewMilestone, ZNewNextStep, ZNewThread,
     ZNextStep, ZNextStepState, ZNextStepUpdate, ZProbeReport, ZRouted, ZThread, ZThreadArtifact,
     ZThreadDetail, ZThreadFilter, ZThreadFollowUp, ZThreadSummary, ZThreadUpdate, ZTurnAck,
@@ -370,7 +370,16 @@ impl AttaccaApi for StubApi {
     }
 
     async fn list_jobs(&self, filter: ZJobFilter) -> zyris::Result<Vec<ZJob>> {
-        let mut out = vec![stub_job("job-1", ZJobState::Processing), stub_job("job-2", ZJobState::Done)];
+        let mut in_thread = stub_job("job-7", ZJobState::Done);
+        in_thread.thread_id = Some("thread-1".into());
+        let mut out = vec![stub_job("job-1", ZJobState::Processing), stub_job("job-2", ZJobState::Done), in_thread];
+        match filter.scope {
+            ZJobScope::All => {}
+            ZJobScope::Standalone => out.retain(|job| job.thread_id.is_none()),
+            ZJobScope::Thread { thread_id } => {
+                out.retain(|job| job.thread_id.as_deref() == Some(thread_id.as_str()))
+            }
+        }
         if let Some(project_id) = filter.project_id {
             out.retain(|job| job.project_id.as_deref() == Some(project_id.as_str()));
         }
@@ -1237,7 +1246,7 @@ async fn job_crud_round_trips() {
     assert_eq!(api.get_job("job-1".into()).await.unwrap().id, "job-1");
 
     let all = api.list_jobs(ZJobFilter::default()).await.unwrap();
-    assert_eq!(all.len(), 2);
+    assert_eq!(all.len(), 3);
     let capped = api.list_jobs(ZJobFilter { limit: Some(1), ..ZJobFilter::default() }).await.unwrap();
     assert_eq!(capped.len(), 1);
 
@@ -1607,5 +1616,41 @@ fn goal_enums_use_attaccas_spelling() {
     assert_eq!(
         serde_json::to_value(zyris_attacca::ZAutoHalt::BlockedOnPerson).unwrap(),
         "blocked_on_person"
+    );
+}
+
+#[tokio::test]
+async fn list_jobs_tells_standalone_jobs_from_a_threads() {
+    let api = client().await;
+    let list = |scope| api.list_jobs(ZJobFilter { scope, ..ZJobFilter::default() });
+
+    let standalone = list(ZJobScope::Standalone).await.unwrap();
+    assert_eq!(standalone.len(), 2);
+    assert!(standalone.iter().all(|job| job.thread_id.is_none()));
+
+    let in_thread = list(ZJobScope::Thread { thread_id: "thread-1".into() }).await.unwrap();
+    assert_eq!(in_thread.len(), 1);
+    assert_eq!(in_thread[0].id, "job-7");
+}
+
+#[test]
+fn job_scope_wire_shape_and_its_default() {
+    // A filter that asks for everything serializes exactly as it did before threads.
+    assert_eq!(serde_json::to_value(ZJobFilter::default()).unwrap(), serde_json::json!({}));
+    let filter: ZJobFilter = serde_json::from_value(serde_json::json!({ "limit": 5 })).unwrap();
+    assert_eq!(filter.scope, ZJobScope::All);
+
+    let thread = ZJobFilter {
+        scope: ZJobScope::Thread { thread_id: "thread-1".into() },
+        ..ZJobFilter::default()
+    };
+    assert_eq!(
+        serde_json::to_value(&thread).unwrap(),
+        serde_json::json!({ "scope": { "kind": "thread", "thread_id": "thread-1" } })
+    );
+    let standalone = ZJobFilter { scope: ZJobScope::Standalone, ..ZJobFilter::default() };
+    assert_eq!(
+        serde_json::to_value(&standalone).unwrap(),
+        serde_json::json!({ "scope": { "kind": "standalone" } })
     );
 }

@@ -463,6 +463,32 @@ pub struct ZJobFilter {
     pub project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    /// Which jobs, by thread. Defaults to all of them.
+    #[serde(default, skip_serializing_if = "ZJobScope::is_all")]
+    pub scope: ZJobScope,
+}
+
+/// Which jobs [`AttaccaApi::list_jobs`] lists, by the thread they belong to. Not to be confused with
+/// [`ZScope`], which is about permission.
+///
+/// A deployment that predates threads ignores this and lists every job; a node that must not show a
+/// thread's jobs as standalone can check each [`ZJob::thread_id`] itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ZJobScope {
+    /// Every job, in a thread or not.
+    #[default]
+    All,
+    /// Only jobs that belong to no thread.
+    Standalone,
+    /// Only the jobs of one thread.
+    Thread { thread_id: String },
+}
+
+impl ZJobScope {
+    pub fn is_all(&self) -> bool {
+        *self == ZJobScope::All
+    }
 }
 
 /// Where a work is in its life. Like [`ZJobState`], derived rather than set — but two of these are
@@ -1465,7 +1491,8 @@ pub trait AttaccaApi {
         delivered: Option<ZDelivered>,
     ) -> zyris::Result<()>;
 
-    /// List the caller's jobs, newest first.
+    /// List the caller's jobs, newest first: all of them, only standalone ones, or one thread's —
+    /// see [`ZJobFilter::scope`].
     async fn list_jobs(&self, filter: ZJobFilter) -> zyris::Result<Vec<ZJob>>;
 
     /// Read one job.
