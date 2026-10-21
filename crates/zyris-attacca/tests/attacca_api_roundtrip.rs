@@ -14,6 +14,14 @@ use zyris_attacca::{
     ZSessionFilter, ZTask, ZTaskDep, ZTaskState, ZTurnFrame, ZTurnStatus, ZUsage, ZWork,
     ZWorkFilter, ZWorkState, ZWorkTasks, ZWorkUpdate, ATTACCA_API_CAPABILITY,
 };
+use zyris_attacca::{
+    ZAutoHandover, ZChatMessage, ZFollowedUp, ZGoal, ZGoalDetail, ZGoalState, ZGoalUpdate,
+    ZHumanTask, ZHumanTaskResolution, ZJobScope, ZHumanTaskState, ZJobFollowedUp, ZMilestone,
+    ZMilestoneState, ZMilestoneUpdate, ZNewHumanTask, ZNewMilestone, ZNewNextStep, ZNewThread,
+    ZNextStep, ZNextStepState, ZNextStepUpdate, ZProbeReport, ZRouted, ZThread, ZThreadArtifact,
+    ZThreadDetail, ZThreadFilter, ZThreadFollowUp, ZThreadSummary, ZThreadUpdate, ZTurnAck,
+    ZVerification, ZVerificationOutcome,
+};
 
 struct StubApi;
 
@@ -29,8 +37,94 @@ fn stub_job(id: &str, state: ZJobState) -> ZJob {
         last_activity: Some("reading CHANGELOG.md".into()),
         failure_reason: None,
         planning: false,
+        thread_id: None,
         created_at: Some("2026-07-29T00:00:00Z".into()),
         updated_at: Some("2026-07-29T00:00:01Z".into()),
+    }
+}
+
+fn stub_thread(id: &str) -> ZThread {
+    ZThread {
+        id: id.into(),
+        title: "Ship the release".into(),
+        description: None,
+        agent_id: Some("agent-1".into()),
+        project_id: Some("project-1".into()),
+        goal_id: Some("goal-1".into()),
+        created_at: None,
+        updated_at: None,
+    }
+}
+
+fn stub_goal(id: &str, state: ZGoalState) -> ZGoal {
+    ZGoal {
+        id: id.into(),
+        thread_id: "thread-1".into(),
+        thread_title: "Ship the release".into(),
+        agent_id: None,
+        project_id: None,
+        goal: Some("v1 is tagged and published".into()),
+        goal_approved_at: None,
+        state,
+        derived: None,
+        planner_session_id: Some("session-7".into()),
+        verification_default: true,
+        auto_handover: false,
+        max_loops: 3,
+        loop_count: 0,
+        last_activity: None,
+        failure_reason: None,
+        created_at: None,
+        updated_at: None,
+    }
+}
+
+fn stub_step(goal_id: &str, id: &str, state: ZNextStepState) -> ZNextStep {
+    ZNextStep {
+        id: id.into(),
+        goal_id: goal_id.into(),
+        milestone_id: None,
+        position: 0,
+        title: "Bump the version".into(),
+        body: "Bump every crate to 1.0.0".into(),
+        acceptance: None,
+        verification: true,
+        depends_on: vec![],
+        state,
+        job_id: None,
+        handed_over_at: None,
+    }
+}
+
+fn stub_human_task(goal_id: &str, id: &str, state: ZHumanTaskState) -> ZHumanTask {
+    ZHumanTask {
+        id: id.into(),
+        goal_id: goal_id.into(),
+        title: "Log in to crates.io".into(),
+        detail: None,
+        next_step_id: None,
+        milestone_id: None,
+        probe: None,
+        user_note: None,
+        last_probe_ok: None,
+        last_probe_output: None,
+        state,
+    }
+}
+
+fn stub_verification(goal_id: &str, id: &str) -> ZVerification {
+    ZVerification {
+        id: id.into(),
+        goal_id: goal_id.into(),
+        next_step_id: "step-1".into(),
+        work_job_id: "job-1".into(),
+        verification_job_id: None,
+        verdict: None,
+        report: None,
+        change_request: None,
+        proposed_next_step: None,
+        outcome: None,
+        capped: false,
     }
 }
 
@@ -292,7 +386,16 @@ impl AttaccaApi for StubApi {
     }
 
     async fn list_jobs(&self, filter: ZJobFilter) -> zyris::Result<Vec<ZJob>> {
-        let mut out = vec![stub_job("job-1", ZJobState::Processing), stub_job("job-2", ZJobState::Done)];
+        let mut in_thread = stub_job("job-7", ZJobState::Done);
+        in_thread.thread_id = Some("thread-1".into());
+        let mut out = vec![stub_job("job-1", ZJobState::Processing), stub_job("job-2", ZJobState::Done), in_thread];
+        match filter.scope {
+            ZJobScope::All => {}
+            ZJobScope::Standalone => out.retain(|job| job.thread_id.is_none()),
+            ZJobScope::Thread { thread_id } => {
+                out.retain(|job| job.thread_id.as_deref() == Some(thread_id.as_str()))
+            }
+        }
         if let Some(project_id) = filter.project_id {
             out.retain(|job| job.project_id.as_deref() == Some(project_id.as_str()));
         }
@@ -471,6 +574,278 @@ impl AttaccaApi for StubApi {
             sha256: "0".repeat(64),
         })
     }
+
+    // Stub: route anything that asks for it to a new job in a new thread.
+    async fn send_chat(&self, message: ZChatMessage) -> zyris::Result<ZTurnAck> {
+        Ok(if message.route && !message.plan_mode {
+            ZTurnAck {
+                running: false,
+                routed: Some(ZRouted {
+                    job_id: "job-9".into(),
+                    job_session_id: Some("session-9".into()),
+                    thread_id: Some("thread-1".into()),
+                    goal_id: None,
+                }),
+            }
+        } else {
+            ZTurnAck { running: true, routed: None }
+        })
+    }
+
+    async fn job_follow_up(
+        &self,
+        job_id: String,
+        message: String,
+        _title: Option<String>,
+    ) -> zyris::Result<ZJobFollowedUp> {
+        let mut job = stub_job("job-4", ZJobState::Processing);
+        job.description = Some(message);
+        job.thread_id = Some(format!("thread-of-{job_id}"));
+        Ok(ZJobFollowedUp { thread_id: format!("thread-of-{job_id}"), goal_id: None, job, next_step: None })
+    }
+
+    async fn list_threads(&self, _filter: ZThreadFilter) -> zyris::Result<Vec<ZThreadSummary>> {
+        Ok(vec![serde_json::from_value(serde_json::json!({
+            "id": "thread-1", "title": "Ship the release", "state": "awaiting_handover"
+        }))
+        .unwrap()])
+    }
+
+    async fn get_thread(&self, thread_id: String) -> zyris::Result<ZThreadDetail> {
+        let mut job = stub_job("job-1", ZJobState::Done);
+        job.thread_id = Some(thread_id.clone());
+        Ok(ZThreadDetail { thread: stub_thread(&thread_id), artifacts: vec![], jobs: vec![job] })
+    }
+
+    async fn create_thread(&self, thread: ZNewThread) -> zyris::Result<ZThread> {
+        let mut created = stub_thread("thread-2");
+        created.title = thread.title.unwrap_or_default();
+        created.description = thread.description.or(thread.message);
+        Ok(created)
+    }
+
+    async fn update_thread(&self, thread_id: String, update: ZThreadUpdate) -> zyris::Result<ZThread> {
+        let mut thread = stub_thread(&thread_id);
+        if let Some(title) = update.title {
+            thread.title = title;
+        }
+        Ok(thread)
+    }
+
+    async fn delete_thread(&self, _thread_id: String) -> zyris::Result<()> {
+        Ok(())
+    }
+
+    async fn thread_follow_up(
+        &self,
+        thread_id: String,
+        follow_up: ZThreadFollowUp,
+    ) -> zyris::Result<ZFollowedUp> {
+        let mut job = stub_job("job-5", ZJobState::Processing);
+        job.thread_id = Some(thread_id);
+        job.description = Some(follow_up.message);
+        Ok(ZFollowedUp { job, next_step: Some(stub_step("goal-1", "step-2", ZNextStepState::HandedOver)) })
+    }
+
+    async fn add_thread_artifact(
+        &self,
+        thread_id: String,
+        file_id: String,
+        resident: bool,
+    ) -> zyris::Result<ZThreadArtifact> {
+        Ok(ZThreadArtifact { thread_id, file_id, resident, position: 0, created_at: None })
+    }
+
+    async fn remove_thread_artifact(&self, _thread_id: String, _file_id: String) -> zyris::Result<()> {
+        Ok(())
+    }
+
+    async fn create_goal(&self, thread_id: String, goal: Option<String>) -> zyris::Result<ZGoal> {
+        let mut created = stub_goal("goal-2", ZGoalState::Planning);
+        created.thread_id = thread_id;
+        created.goal = goal;
+        Ok(created)
+    }
+
+    async fn get_goal(&self, goal_id: String) -> zyris::Result<ZGoalDetail> {
+        Ok(ZGoalDetail {
+            goal: stub_goal(&goal_id, ZGoalState::AwaitingHandover),
+            milestones: vec![],
+            next_steps: vec![stub_step(&goal_id, "step-1", ZNextStepState::Proposed)],
+            human_tasks: vec![stub_human_task(&goal_id, "task-1", ZHumanTaskState::Open)],
+            verifications: vec![],
+        })
+    }
+
+    async fn update_goal(&self, goal_id: String, update: ZGoalUpdate) -> zyris::Result<ZGoal> {
+        let mut goal = stub_goal(&goal_id, ZGoalState::Running);
+        if let Some(max_loops) = update.max_loops {
+            goal.max_loops = max_loops;
+        }
+        Ok(goal)
+    }
+
+    async fn delete_goal(&self, _goal_id: String) -> zyris::Result<()> {
+        Ok(())
+    }
+
+    async fn set_goal(&self, goal_id: String, text: Option<String>) -> zyris::Result<ZGoal> {
+        let mut goal = stub_goal(&goal_id, ZGoalState::Planning);
+        goal.goal = text;
+        Ok(goal)
+    }
+
+    async fn approve_goal(&self, goal_id: String) -> zyris::Result<ZGoal> {
+        let mut goal = stub_goal(&goal_id, ZGoalState::AwaitingHandover);
+        goal.goal_approved_at = Some("2026-10-21T00:00:00Z".into());
+        Ok(goal)
+    }
+
+    async fn create_milestone(
+        &self,
+        goal_id: String,
+        milestone: ZNewMilestone,
+    ) -> zyris::Result<ZMilestone> {
+        Ok(ZMilestone {
+            id: "milestone-1".into(),
+            goal_id,
+            position: milestone.position.unwrap_or(0),
+            title: milestone.title,
+            detail: milestone.detail,
+            state: ZMilestoneState::Pending,
+            blocked_reason: None,
+        })
+    }
+
+    async fn update_milestone(
+        &self,
+        goal_id: String,
+        milestone_id: String,
+        update: ZMilestoneUpdate,
+    ) -> zyris::Result<ZMilestone> {
+        Ok(ZMilestone {
+            id: milestone_id,
+            goal_id,
+            position: 0,
+            title: update.title.unwrap_or_default(),
+            detail: None,
+            state: update.state.unwrap_or(ZMilestoneState::Pending),
+            blocked_reason: update.blocked_reason,
+        })
+    }
+
+    async fn delete_milestone(&self, _goal_id: String, _milestone_id: String) -> zyris::Result<()> {
+        Ok(())
+    }
+
+    async fn create_next_step(&self, goal_id: String, step: ZNewNextStep) -> zyris::Result<ZNextStep> {
+        let mut created = stub_step(&goal_id, "step-3", ZNextStepState::Proposed);
+        created.title = step.title;
+        created.depends_on = step.depends_on;
+        Ok(created)
+    }
+
+    async fn update_next_step(
+        &self,
+        goal_id: String,
+        next_step_id: String,
+        update: ZNextStepUpdate,
+    ) -> zyris::Result<ZNextStep> {
+        let mut step = stub_step(&goal_id, &next_step_id, ZNextStepState::Proposed);
+        if let Some(depends_on) = update.depends_on {
+            step.depends_on = depends_on;
+        }
+        Ok(step)
+    }
+
+    async fn delete_next_step(&self, _goal_id: String, _next_step_id: String) -> zyris::Result<()> {
+        Ok(())
+    }
+
+    async fn hand_over_next_step(
+        &self,
+        goal_id: String,
+        next_step_id: String,
+        verification: Option<bool>,
+    ) -> zyris::Result<ZNextStep> {
+        let mut step = stub_step(&goal_id, &next_step_id, ZNextStepState::HandedOver);
+        step.verification = verification.unwrap_or(step.verification);
+        step.job_id = Some("job-6".into());
+        Ok(step)
+    }
+
+    async fn set_auto_handover(&self, goal_id: String, enabled: bool) -> zyris::Result<ZAutoHandover> {
+        let mut goal = stub_goal(&goal_id, ZGoalState::Running);
+        goal.auto_handover = enabled;
+        let report = enabled.then(|| zyris_attacca::ZAdvanceReport {
+            accepted: vec![],
+            handed_over: vec!["step-1".into()],
+            halted: Some(zyris_attacca::ZAutoHalt::InFlight),
+        });
+        Ok(ZAutoHandover { goal, report })
+    }
+
+    async fn accept_verification(
+        &self,
+        goal_id: String,
+        verification_id: String,
+    ) -> zyris::Result<ZVerification> {
+        let mut verification = stub_verification(&goal_id, &verification_id);
+        verification.outcome = Some(ZVerificationOutcome::Accepted);
+        Ok(verification)
+    }
+
+    async fn dismiss_verification(
+        &self,
+        goal_id: String,
+        verification_id: String,
+    ) -> zyris::Result<ZVerification> {
+        let mut verification = stub_verification(&goal_id, &verification_id);
+        verification.outcome = Some(ZVerificationOutcome::Dismissed);
+        Ok(verification)
+    }
+
+    async fn create_human_task(&self, goal_id: String, task: ZNewHumanTask) -> zyris::Result<ZHumanTask> {
+        let mut created = stub_human_task(&goal_id, "task-2", ZHumanTaskState::Open);
+        created.title = task.title;
+        created.probe = task.probe;
+        Ok(created)
+    }
+
+    async fn resolve_human_task(
+        &self,
+        goal_id: String,
+        task_id: String,
+        resolution: ZHumanTaskResolution,
+    ) -> zyris::Result<ZHumanTask> {
+        let state = match resolution {
+            ZHumanTaskResolution::Done => ZHumanTaskState::Done,
+            ZHumanTaskResolution::Dismissed => ZHumanTaskState::Dismissed,
+        };
+        Ok(stub_human_task(&goal_id, &task_id, state))
+    }
+
+    async fn recheck_human_task(&self, goal_id: String, task_id: String) -> zyris::Result<ZProbeReport> {
+        Ok(ZProbeReport {
+            status: "no_probe".into(),
+            ran: false,
+            ok: None,
+            output: String::new(),
+            task: stub_human_task(&goal_id, &task_id, ZHumanTaskState::Open),
+            next_step_state: None,
+        })
+    }
+
+    async fn set_human_task_note(
+        &self,
+        goal_id: String,
+        task_id: String,
+        note: Option<String>,
+    ) -> zyris::Result<ZHumanTask> {
+        let mut task = stub_human_task(&goal_id, &task_id, ZHumanTaskState::Open);
+        task.user_note = note;
+        Ok(task)
+    }
 }
 
 fn server_node() -> Node {
@@ -493,7 +868,7 @@ fn descriptor_matches_the_reserved_name() {
     let descriptor = attacca_api_capability();
     assert_eq!(descriptor.name, ATTACCA_API_CAPABILITY);
     assert_eq!(descriptor.version, 1);
-    assert_eq!(descriptor.tools.len(), 39);
+    assert_eq!(descriptor.tools.len(), 69);
     // A credential exists to create nodes, so nothing on this surface registers, lists or deletes
     // one any more. A deployment still serving these would be one this crate cannot call.
     for gone in ["register_node", "list_nodes", "delete_node"] {
@@ -889,6 +1264,7 @@ async fn job_crud_round_trips() {
             timezone: Some("Europe/Berlin".into()),
             planning: false,
             plan_mode: false,
+            factcheck: false,
             data: Vec::new(),
         })
         .await
@@ -901,7 +1277,7 @@ async fn job_crud_round_trips() {
     assert_eq!(api.get_job("job-1".into()).await.unwrap().id, "job-1");
 
     let all = api.list_jobs(ZJobFilter::default()).await.unwrap();
-    assert_eq!(all.len(), 2);
+    assert_eq!(all.len(), 3);
     let capped = api.list_jobs(ZJobFilter { limit: Some(1), ..ZJobFilter::default() }).await.unwrap();
     assert_eq!(capped.len(), 1);
 
@@ -1124,4 +1500,188 @@ async fn peer_relay_and_request_file_cross_the_wire() {
     let offered = api.request_file("f-1".into()).await.unwrap();
     assert_eq!(offered.transfer_id, "t-1");
     assert_eq!(offered.size, 3);
+}
+
+#[tokio::test]
+async fn send_chat_says_where_a_routed_message_went() {
+    let api = client().await;
+    let chat = |route, plan_mode| ZChatMessage {
+        session_id: "session-1".into(),
+        message: "refactor the parser".into(),
+        agent_id: None,
+        route,
+        plan_mode,
+    };
+
+    let routed = api.send_chat(chat(true, false)).await.unwrap();
+    assert!(!routed.running);
+    let to = routed.routed.unwrap();
+    assert_eq!(to.job_id, "job-9");
+    assert_eq!(to.job_session_id.as_deref(), Some("session-9"));
+
+    // Plan mode is never routed: the turn runs where it was sent.
+    let here = api.send_chat(chat(true, true)).await.unwrap();
+    assert!(here.running && here.routed.is_none());
+}
+
+#[test]
+fn chat_message_without_route_or_plan_mode_decodes_as_a_plain_message() {
+    let message: ZChatMessage =
+        serde_json::from_value(serde_json::json!({ "session_id": "s", "message": "hi" })).unwrap();
+    assert!(!message.route && !message.plan_mode);
+}
+
+#[test]
+fn a_job_from_before_threads_decodes_without_a_thread() {
+    let mut wire = serde_json::to_value(stub_job("job-1", ZJobState::Done)).unwrap();
+    assert!(!wire.as_object().unwrap().contains_key("thread_id"));
+    wire.as_object_mut().unwrap().remove("planning");
+    let back: ZJob = serde_json::from_value(wire).unwrap();
+    assert_eq!(back.thread_id, None);
+}
+
+#[tokio::test]
+async fn a_thread_is_opened_followed_up_and_read_back() {
+    let api = client().await;
+
+    let thread = api
+        .create_thread(ZNewThread {
+            message: Some("Ship the release".into()),
+            ..ZNewThread::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(thread.description.as_deref(), Some("Ship the release"));
+
+    let followed = api
+        .thread_follow_up(
+            "thread-1".into(),
+            ZThreadFollowUp {
+                message: "also update the changelog".into(),
+                source_job_id: Some("job-1".into()),
+                agent_id: None,
+                plan_mode: false,
+                factcheck: false,
+                data: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(followed.job.thread_id.as_deref(), Some("thread-1"));
+    assert_eq!(followed.next_step.unwrap().state, ZNextStepState::HandedOver);
+
+    let from_job = api.job_follow_up("job-1".into(), "and tag it".into(), None).await.unwrap();
+    assert_eq!(from_job.job.thread_id.as_deref(), Some(from_job.thread_id.as_str()));
+
+    let detail = api.get_thread("thread-1".into()).await.unwrap();
+    assert_eq!(detail.jobs[0].thread_id.as_deref(), Some("thread-1"));
+
+    let listed = api.list_threads(ZThreadFilter::default()).await.unwrap();
+    assert_eq!(listed[0].state, ZGoalState::AwaitingHandover);
+    assert!(listed[0].jobs.is_empty());
+
+    let pinned = api.add_thread_artifact("thread-1".into(), "file-1".into(), true).await.unwrap();
+    assert!(pinned.resident);
+    api.remove_thread_artifact("thread-1".into(), "file-1".into()).await.unwrap();
+    api.delete_thread("thread-1".into()).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_plan_is_approved_handed_over_and_unblocked() {
+    let api = client().await;
+
+    let detail = api.get_goal("goal-1".into()).await.unwrap();
+    assert_eq!(detail.next_steps[0].state, ZNextStepState::Proposed);
+    let approved = api.approve_goal("goal-1".into()).await.unwrap();
+    assert!(approved.goal_approved_at.is_some());
+
+    let step = api
+        .hand_over_next_step("goal-1".into(), "step-1".into(), Some(false))
+        .await
+        .unwrap();
+    assert_eq!(step.state, ZNextStepState::HandedOver);
+    assert!(!step.verification);
+
+    let auto = api.set_auto_handover("goal-1".into(), true).await.unwrap();
+    assert!(auto.goal.auto_handover);
+    assert_eq!(auto.report.unwrap().halted, Some(zyris_attacca::ZAutoHalt::InFlight));
+    assert!(api.set_auto_handover("goal-1".into(), false).await.unwrap().report.is_none());
+
+    let resolved = api
+        .resolve_human_task("goal-1".into(), "task-1".into(), ZHumanTaskResolution::Dismissed)
+        .await
+        .unwrap();
+    assert_eq!(resolved.state, ZHumanTaskState::Dismissed);
+    let noted = api
+        .set_human_task_note("goal-1".into(), "task-1".into(), Some("done on my phone".into()))
+        .await
+        .unwrap();
+    assert_eq!(noted.user_note.as_deref(), Some("done on my phone"));
+
+    let accepted = api.accept_verification("goal-1".into(), "v-1".into()).await.unwrap();
+    assert_eq!(accepted.outcome, Some(ZVerificationOutcome::Accepted));
+
+    let step = api
+        .create_next_step(
+            "goal-1".into(),
+            ZNewNextStep {
+                title: "Publish".into(),
+                body: "cargo publish every crate".into(),
+                depends_on: vec!["step-1".into()],
+                ..ZNewNextStep::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(step.depends_on, ["step-1"]);
+}
+
+#[test]
+fn goal_enums_use_attaccas_spelling() {
+    assert_eq!(serde_json::to_value(ZGoalState::AwaitingHandover).unwrap(), "awaiting_handover");
+    assert_eq!(serde_json::to_value(ZNextStepState::HandedOver).unwrap(), "handed_over");
+    assert_eq!(
+        serde_json::to_value(zyris_attacca::ZVerificationVerdict::ChangeRequest).unwrap(),
+        "change_request"
+    );
+    assert_eq!(
+        serde_json::to_value(zyris_attacca::ZAutoHalt::BlockedOnPerson).unwrap(),
+        "blocked_on_person"
+    );
+}
+
+#[tokio::test]
+async fn list_jobs_tells_standalone_jobs_from_a_threads() {
+    let api = client().await;
+    let list = |scope| api.list_jobs(ZJobFilter { scope, ..ZJobFilter::default() });
+
+    let standalone = list(ZJobScope::Standalone).await.unwrap();
+    assert_eq!(standalone.len(), 2);
+    assert!(standalone.iter().all(|job| job.thread_id.is_none()));
+
+    let in_thread = list(ZJobScope::Thread { thread_id: "thread-1".into() }).await.unwrap();
+    assert_eq!(in_thread.len(), 1);
+    assert_eq!(in_thread[0].id, "job-7");
+}
+
+#[test]
+fn job_scope_wire_shape_and_its_default() {
+    // A filter that asks for everything serializes exactly as it did before threads.
+    assert_eq!(serde_json::to_value(ZJobFilter::default()).unwrap(), serde_json::json!({}));
+    let filter: ZJobFilter = serde_json::from_value(serde_json::json!({ "limit": 5 })).unwrap();
+    assert_eq!(filter.scope, ZJobScope::All);
+
+    let thread = ZJobFilter {
+        scope: ZJobScope::Thread { thread_id: "thread-1".into() },
+        ..ZJobFilter::default()
+    };
+    assert_eq!(
+        serde_json::to_value(&thread).unwrap(),
+        serde_json::json!({ "scope": { "kind": "thread", "thread_id": "thread-1" } })
+    );
+    let standalone = ZJobFilter { scope: ZJobScope::Standalone, ..ZJobFilter::default() };
+    assert_eq!(
+        serde_json::to_value(&standalone).unwrap(),
+        serde_json::json!({ "scope": { "kind": "standalone" } })
+    );
 }
