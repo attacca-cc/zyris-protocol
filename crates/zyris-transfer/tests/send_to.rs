@@ -179,6 +179,96 @@ impl AttaccaApi for StubRendezvous {
     async fn request_file(&self, _file_id: String) -> Result<zyris_attacca::ZFileOffered> {
         unused()
     }
+    async fn send_chat(&self, _m: zyris_attacca::ZChatMessage) -> Result<zyris_attacca::ZTurnAck> {
+        unused()
+    }
+    async fn job_follow_up(&self, _j: String, _m: String, _t: Option<String>) -> Result<zyris_attacca::ZJobFollowedUp> {
+        unused()
+    }
+    async fn list_threads(&self, _f: zyris_attacca::ZThreadFilter) -> Result<Vec<zyris_attacca::ZThreadSummary>> {
+        unused()
+    }
+    async fn get_thread(&self, _t: String) -> Result<zyris_attacca::ZThreadDetail> {
+        unused()
+    }
+    async fn create_thread(&self, _t: zyris_attacca::ZNewThread) -> Result<zyris_attacca::ZThread> {
+        unused()
+    }
+    async fn update_thread(&self, _t: String, _u: zyris_attacca::ZThreadUpdate) -> Result<zyris_attacca::ZThread> {
+        unused()
+    }
+    async fn delete_thread(&self, _t: String) -> Result<()> {
+        unused()
+    }
+    async fn thread_follow_up(&self, _t: String, _f: zyris_attacca::ZThreadFollowUp) -> Result<zyris_attacca::ZFollowedUp> {
+        unused()
+    }
+    async fn add_thread_artifact(&self, _t: String, _f: String, _r: bool) -> Result<zyris_attacca::ZThreadArtifact> {
+        unused()
+    }
+    async fn remove_thread_artifact(&self, _t: String, _f: String) -> Result<()> {
+        unused()
+    }
+    async fn create_goal(&self, _t: String, _g: Option<String>) -> Result<zyris_attacca::ZGoal> {
+        unused()
+    }
+    async fn get_goal(&self, _g: String) -> Result<zyris_attacca::ZGoalDetail> {
+        unused()
+    }
+    async fn update_goal(&self, _g: String, _u: zyris_attacca::ZGoalUpdate) -> Result<zyris_attacca::ZGoal> {
+        unused()
+    }
+    async fn delete_goal(&self, _g: String) -> Result<()> {
+        unused()
+    }
+    async fn set_goal(&self, _g: String, _t: Option<String>) -> Result<zyris_attacca::ZGoal> {
+        unused()
+    }
+    async fn approve_goal(&self, _g: String) -> Result<zyris_attacca::ZGoal> {
+        unused()
+    }
+    async fn create_milestone(&self, _g: String, _m: zyris_attacca::ZNewMilestone) -> Result<zyris_attacca::ZMilestone> {
+        unused()
+    }
+    async fn update_milestone(&self, _g: String, _m: String, _u: zyris_attacca::ZMilestoneUpdate) -> Result<zyris_attacca::ZMilestone> {
+        unused()
+    }
+    async fn delete_milestone(&self, _g: String, _m: String) -> Result<()> {
+        unused()
+    }
+    async fn create_next_step(&self, _g: String, _s: zyris_attacca::ZNewNextStep) -> Result<zyris_attacca::ZNextStep> {
+        unused()
+    }
+    async fn update_next_step(&self, _g: String, _s: String, _u: zyris_attacca::ZNextStepUpdate) -> Result<zyris_attacca::ZNextStep> {
+        unused()
+    }
+    async fn delete_next_step(&self, _g: String, _s: String) -> Result<()> {
+        unused()
+    }
+    async fn hand_over_next_step(&self, _g: String, _s: String, _v: Option<bool>) -> Result<zyris_attacca::ZNextStep> {
+        unused()
+    }
+    async fn set_auto_handover(&self, _g: String, _e: bool) -> Result<zyris_attacca::ZAutoHandover> {
+        unused()
+    }
+    async fn accept_verification(&self, _g: String, _v: String) -> Result<zyris_attacca::ZVerification> {
+        unused()
+    }
+    async fn dismiss_verification(&self, _g: String, _v: String) -> Result<zyris_attacca::ZVerification> {
+        unused()
+    }
+    async fn create_human_task(&self, _g: String, _t: zyris_attacca::ZNewHumanTask) -> Result<zyris_attacca::ZHumanTask> {
+        unused()
+    }
+    async fn resolve_human_task(&self, _g: String, _t: String, _r: zyris_attacca::ZHumanTaskResolution) -> Result<zyris_attacca::ZHumanTask> {
+        unused()
+    }
+    async fn recheck_human_task(&self, _g: String, _t: String) -> Result<zyris_attacca::ZProbeReport> {
+        unused()
+    }
+    async fn set_human_task_note(&self, _g: String, _t: String, _n: Option<String>) -> Result<zyris_attacca::ZHumanTask> {
+        unused()
+    }
 }
 
 /// A live `AttaccaApiClient` whose `peer_lookup` gives back `answer`.

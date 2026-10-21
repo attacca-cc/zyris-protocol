@@ -3,8 +3,12 @@
 //! Every other capability in this workspace is something a *node* offers. This one runs the other
 //! way: [Attacca](https://attacca.cc) reserves the name `attacca_api`, rejects it from any node
 //! that tries to announce it, and announces it itself right after the handshake. A node picks the
-//! client up on connect and drives agents, projects and sessions over the same websocket it serves
-//! its own tools on.
+//! client up on connect and drives agents, projects, jobs and threads over the same websocket it
+//! serves its own tools on.
+//!
+//! Attacca's composer has three kinds of chat, and each is one call here: "Chat" is `create_job`,
+//! "Plan" is `create_job` with `plan_mode`, and "Thread" is `create_thread`. Bare sessions and works
+//! are no longer started from Attacca's UI; their tools stay for what already exists.
 //!
 //! It sits in its own crate rather than in `zyris-caps` because `zyris-caps` is the catalogue of
 //! things a node implements, and this is the one surface a node only ever calls.
@@ -392,10 +396,14 @@ pub struct ZJob {
     /// Why the job ended, set only in [`ZJobState::Failed`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
-    /// A planning job: it drafts a plan and turns it into a [`ZWork`] rather than doing the work
-    /// itself.
+    /// A planning job: it drafts a thread's plan (its [`ZGoal`]) rather than doing the work itself.
+    /// The job [`AttaccaApi::create_thread`] starts is one.
     #[serde(default)]
     pub planning: bool,
+    /// The thread this job belongs to. Absent for a job that stands alone, and on a deployment that
+    /// predates threads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     /// RFC 3339.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
@@ -419,13 +427,19 @@ pub struct ZNewJob {
     /// leaves the deployment's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
-    /// Draft a plan and turn it into a [`ZWork`] instead of doing the work here.
+    /// Draft a plan instead of doing the work here. Prefer [`AttaccaApi::create_thread`], which
+    /// starts such a job with a thread for the plan to live in.
     #[serde(default)]
     pub planning: bool,
     /// Investigate, hand back a plan, and wait for approval before executing — all within this one
-    /// job. Distinct from `planning`, which hands off to a work.
+    /// job. Distinct from `planning`, which hands off to a thread's plan. This is the web composer's
+    /// "Plan"; leaving it unset is its "Chat".
     #[serde(default)]
     pub plan_mode: bool,
+    /// Fact-check the job's chat: after each reply a background checker rates its factual claims and
+    /// reports the low-confidence ones back to the agent.
+    #[serde(default)]
+    pub factcheck: bool,
     /// Attachments for the opening message, the same way `send_message` takes them. Text datums are
     /// folded into `message`; files land in the account's workspace.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -743,6 +757,601 @@ pub struct ZFileOffered {
     pub sha256: String,
 }
 
+/// What [`AttaccaApi::send_chat`] takes: a message into a session, as the web chat sends one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZChatMessage {
+    pub session_id: String,
+    pub message: String,
+    /// The agent that answers this one message, in place of the session's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// Let Attacca's router decide whether this is a reply here or a job to hand off. A routed
+    /// message runs as a job, inside a thread when it needs a plan, and the answer says where.
+    #[serde(default)]
+    pub route: bool,
+    /// Investigate, hand back a plan, and wait for approval before executing. Never routed.
+    #[serde(default)]
+    pub plan_mode: bool,
+}
+
+/// Where a routed message went, in [`ZTurnAck::routed`]. `job_id` is always set; the rest are set
+/// when the router opened a thread for it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZRouted {
+    pub job_id: String,
+    /// The job's own session — `turn_events` on it follows the work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_id: Option<String>,
+}
+
+/// [`AttaccaApi::send_chat`]'s answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZTurnAck {
+    /// A turn started on the session the message was sent to. False exactly when it was routed.
+    pub running: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routed: Option<ZRouted>,
+}
+
+/// A thread: a line of work made of jobs, with at most one live plan ([`ZGoal`]). A thread has no
+/// session and no state of its own — talk to its jobs, and read its progress off its goal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZThread {
+    pub id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The thread's agent. A member job may name its own. Absent once that agent is deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_id: Option<String>,
+    /// RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+/// One job row of a [`ZThreadSummary`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZThreadJobRow {
+    pub id: String,
+    pub title: String,
+    pub state: ZJobState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// The job is verifying another job's result.
+    #[serde(default)]
+    pub is_verifying: bool,
+    /// The job is waiting on a person.
+    #[serde(default)]
+    pub needs_user: bool,
+    /// RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_active_at: Option<String>,
+}
+
+/// One entry of [`AttaccaApi::list_threads`]: the thread, with its plan's progress rolled up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZThreadSummary {
+    pub id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    pub state: ZGoalState,
+    /// How a `closed` plan came to rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived: Option<ZGoalResting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_id: Option<String>,
+    /// The goal text, once drafted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub auto_handover: bool,
+    #[serde(default)]
+    pub milestone_total: u32,
+    #[serde(default)]
+    pub milestone_done: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_milestone_title: Option<String>,
+    #[serde(default)]
+    pub job_count: u32,
+    #[serde(default)]
+    pub running_job_count: u32,
+    /// Human tasks still open: things only a person can do before the plan goes on.
+    #[serde(default)]
+    pub human_blocked_count: u32,
+    /// Jobs waiting on an answer. `awaiting_question_session_id` is where to send one.
+    #[serde(default)]
+    pub awaiting_question_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub awaiting_question_session_id: Option<String>,
+    #[serde(default)]
+    pub jobs: Vec<ZThreadJobRow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity: Option<String>,
+    /// RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_active_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+/// A file pinned to a thread. A resident artifact is handed to every job the thread starts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZThreadArtifact {
+    pub thread_id: String,
+    pub file_id: String,
+    pub resident: bool,
+    pub position: i32,
+    /// RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+}
+
+/// [`AttaccaApi::get_thread`]'s answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZThreadDetail {
+    pub thread: ZThread,
+    #[serde(default)]
+    pub artifacts: Vec<ZThreadArtifact>,
+    #[serde(default)]
+    pub jobs: Vec<ZJob>,
+}
+
+/// What [`AttaccaApi::create_thread`] takes — the web composer's "Thread".
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZNewThread {
+    /// What the thread is for. Starts the planning job; without it only the thread is created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Defaults to `message`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Omit for the account's Main Agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// Omit for the account's default project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Attachments for the planning job. Refused without a `message`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data: Vec<Datum>,
+}
+
+/// A partial thread edit: an omitted field is left alone.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZThreadUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZThreadFilter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+}
+
+/// What [`AttaccaApi::thread_follow_up`] takes: a new job in an existing thread.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZThreadFollowUp {
+    pub message: String,
+    /// The job this follows on from, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_job_id: Option<String>,
+    /// Omit for the thread's agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub plan_mode: bool,
+    #[serde(default)]
+    pub factcheck: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data: Vec<Datum>,
+}
+
+/// [`AttaccaApi::thread_follow_up`]'s answer: the job started, and the next step recorded for it
+/// when the thread has a plan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZFollowedUp {
+    pub job: ZJob,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_step: Option<ZNextStep>,
+}
+
+/// [`AttaccaApi::job_follow_up`]'s answer: the thread the job now belongs to — opened for it if it
+/// stood alone — and the follow-up job started in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZJobFollowedUp {
+    pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_id: Option<String>,
+    pub job: ZJob,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_step: Option<ZNextStep>,
+}
+
+/// Where a thread's plan is. Derived, like [`ZJobState`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZGoalState {
+    /// The planning job is drafting the goal and its milestones.
+    Planning,
+    /// Next steps are ready and wait to be handed over — by hand, or by auto-handover.
+    AwaitingHandover,
+    Running,
+    Closed,
+    Failed,
+}
+
+/// How a closed plan came to rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZGoalResting {
+    Complete,
+    Failed,
+}
+
+/// A thread's plan: a measurable goal, milestones toward it, and next steps that become jobs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZGoal {
+    pub id: String,
+    pub thread_id: String,
+    pub thread_title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// The goal text. Read it before [`AttaccaApi::approve_goal`] — it is what is being approved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<String>,
+    /// RFC 3339. Absent until approved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_approved_at: Option<String>,
+    pub state: ZGoalState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived: Option<ZGoalResting>,
+    /// The planning job's session: `send_message` to steer the plan, `turn_events` to watch it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planner_session_id: Option<String>,
+    /// Whether a handed-over step is verified by default.
+    #[serde(default)]
+    pub verification_default: bool,
+    /// Hand ready next steps over without waiting for a person.
+    #[serde(default)]
+    pub auto_handover: bool,
+    /// How many verify-and-retry loops the plan may run.
+    #[serde(default)]
+    pub max_loops: i32,
+    #[serde(default)]
+    pub loop_count: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+    /// RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+/// A partial goal edit: an omitted field is left alone.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZGoalUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_default: Option<bool>,
+    /// Prefer [`AttaccaApi::set_auto_handover`], which also advances the plan when turning it on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_handover: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_loops: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZMilestoneState {
+    Pending,
+    Active,
+    Done,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZMilestone {
+    pub id: String,
+    pub goal_id: String,
+    pub position: i32,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub state: ZMilestoneState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZNewMilestone {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Omit to append.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<i32>,
+}
+
+/// A partial milestone edit: an omitted field is left alone.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZMilestoneUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<ZMilestoneState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZNextStepState {
+    /// Drafted, not yet a job. Only a proposed step can be handed over.
+    Proposed,
+    /// Running as `job_id`.
+    HandedOver,
+    Blocked,
+    Done,
+    Dropped,
+}
+
+/// One unit of a plan, which becomes a job when handed over.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZNextStep {
+    pub id: String,
+    pub goal_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone_id: Option<String>,
+    pub position: i32,
+    pub title: String,
+    /// What the job is told to do.
+    pub body: String,
+    /// What has to hold for the step to count as done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance: Option<String>,
+    /// A verification job checks the result against `acceptance`.
+    #[serde(default)]
+    pub verification: bool,
+    /// Steps that must be done first.
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    pub state: ZNextStepState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    /// RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handed_over_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZNewNextStep {
+    pub title: String,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone_id: Option<String>,
+    /// Omit for the goal's `verification_default`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<i32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
+}
+
+/// A partial next-step edit: an omitted field is left alone.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZNextStepUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<i32>,
+    /// Replaces the whole list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depends_on: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZVerificationVerdict {
+    Pass,
+    ChangeRequest,
+    NewNextStep,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZVerificationOutcome {
+    Accepted,
+    Dismissed,
+}
+
+/// A verification job's judgement of a handed-over step, waiting for a person to accept or dismiss.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZVerification {
+    pub id: String,
+    pub goal_id: String,
+    pub next_step_id: String,
+    /// The job whose result was checked.
+    pub work_job_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_job_id: Option<String>,
+    /// Absent while the verification job is still running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<ZVerificationVerdict>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_request: Option<String>,
+    /// The step a `new_next_step` verdict proposes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_next_step: Option<ZNewNextStep>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<ZVerificationOutcome>,
+    /// The plan's loop cap was reached, so this verdict does not loop again on its own.
+    #[serde(default)]
+    pub capped: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZHumanTaskState {
+    Open,
+    Done,
+    Dismissed,
+}
+
+/// Something only a person can do — a login, a purchase, a decision — that the plan waits on.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZHumanTask {
+    pub id: String,
+    pub goal_id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_step_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone_id: Option<String>,
+    /// A check Attacca can run to see whether the task is done, for `recheck_human_task`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_probe_ok: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_probe_output: Option<String>,
+    pub state: ZHumanTaskState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZNewHumanTask {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_step_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<String>,
+}
+
+/// How [`AttaccaApi::resolve_human_task`] closes a task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZHumanTaskResolution {
+    Done,
+    Dismissed,
+}
+
+/// [`AttaccaApi::recheck_human_task`]'s answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZProbeReport {
+    /// `resolved`, `still_blocked`, `could_not_run`, `no_probe` or `already_resolved`. A string
+    /// rather than an enum so a deployment may add one.
+    pub status: String,
+    pub ran: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    #[serde(default)]
+    pub output: String,
+    pub task: ZHumanTask,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_step_state: Option<ZNextStepState>,
+}
+
+/// [`AttaccaApi::get_goal`]'s answer: the whole plan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZGoalDetail {
+    pub goal: ZGoal,
+    #[serde(default)]
+    pub milestones: Vec<ZMilestone>,
+    #[serde(default)]
+    pub next_steps: Vec<ZNextStep>,
+    #[serde(default)]
+    pub human_tasks: Vec<ZHumanTask>,
+    #[serde(default)]
+    pub verifications: Vec<ZVerification>,
+}
+
+/// Why auto-handover stopped advancing the plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZAutoHalt {
+    BlockedOnPerson,
+    VerificationFailed,
+    CreditsRefused,
+    WaitingOnDependencies,
+    InFlight,
+    Idle,
+}
+
+/// What turning auto-handover on did straight away.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZAdvanceReport {
+    /// Verifications accepted.
+    #[serde(default)]
+    pub accepted: Vec<String>,
+    /// Next steps handed over.
+    #[serde(default)]
+    pub handed_over: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub halted: Option<ZAutoHalt>,
+}
+
+/// [`AttaccaApi::set_auto_handover`]'s answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ZAutoHandover {
+    pub goal: ZGoal,
+    /// Absent when auto-handover was turned off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<ZAdvanceReport>,
+}
+
 #[zyris::capability(name = "attacca_api", version = 1)]
 pub trait AttaccaApi {
     /// Identify the account this connection is authorized as, and the scopes it was granted.
@@ -782,6 +1391,9 @@ pub trait AttaccaApi {
     /// Create a session. Kept for nodes built before `create_session_with`, which is the same call
     /// with room for the options added since.
     ///
+    /// Legacy: Attacca's own UI no longer opens bare sessions. To start a conversation, prefer
+    /// `create_job` (or `create_thread` for something that needs a plan).
+    ///
     /// Pass `title` as null unless a human will go looking for this session under a name the node
     /// already knows: Attacca titles a session from its first message, and a title given here is
     /// permanent and suppresses that.
@@ -792,6 +1404,8 @@ pub trait AttaccaApi {
         project_id: Option<String>,
     ) -> zyris::Result<ZSession>;
 
+    /// Legacy, as `create_session` is; still the way to get a session with a `preamble`.
+    ///
     /// Create a session, with options — most usefully a `preamble`, which gives this session its own
     /// system instructions on top of its agent's. Leave `title` unset unless the node has a name
     /// worth pinning; Attacca titles the session from its first message otherwise.
@@ -830,6 +1444,14 @@ pub trait AttaccaApi {
     /// unknown-tool error; a node falls back to `send_message` and the session's agent.
     async fn send_message_with(&self, message: ZNewMessage) -> zyris::Result<()>;
 
+    /// Post a message the way the web chat does: with `route`, Attacca's router may run it as a job
+    /// (inside a thread when it needs a plan) instead of a turn here, and the answer says where it
+    /// went — follow `routed.job_session_id` with `turn_events`. `sessions:write`.
+    ///
+    /// Added within version 1; an older deployment answers `capability_not_announced`, and a node
+    /// falls back to `send_message_with`.
+    async fn send_chat(&self, message: ZChatMessage) -> zyris::Result<ZTurnAck>;
+
     /// Stop the running turn on a session, and keep only what the person got.
     ///
     /// Whatever answer text streamed before the stop is kept. With `delivered`, the stored answer is
@@ -858,6 +1480,160 @@ pub trait AttaccaApi {
 
     /// Delete a job.
     async fn delete_job(&self, job_id: String) -> zyris::Result<()>;
+
+    /// Follow up on a finished job: the follow-up runs as a new job in the original's thread, which
+    /// is opened for it if the original stood alone. A blank `message` is refused. `jobs:write`.
+    async fn job_follow_up(
+        &self,
+        job_id: String,
+        message: String,
+        title: Option<String>,
+    ) -> zyris::Result<ZJobFollowedUp>;
+
+    // Threads and their plans (goals) are jobs grouped and planned, so they are scoped as jobs:
+    // `jobs:read` to read, `jobs:write` for everything else. Added within version 1.
+
+    /// List the caller's threads, most recently active first.
+    async fn list_threads(&self, filter: ZThreadFilter) -> zyris::Result<Vec<ZThreadSummary>>;
+
+    /// Read one thread, with its artifacts and jobs.
+    async fn get_thread(&self, thread_id: String) -> zyris::Result<ZThreadDetail>;
+
+    /// Open a thread — the web composer's "Thread". With a `message` it starts a planning job that
+    /// drafts the thread's goal; the plan then waits at `approve_goal`.
+    async fn create_thread(&self, thread: ZNewThread) -> zyris::Result<ZThread>;
+
+    /// Edit a thread's title, description or project. Omitted fields are left alone.
+    async fn update_thread(&self, thread_id: String, update: ZThreadUpdate) -> zyris::Result<ZThread>;
+
+    /// Delete a thread.
+    async fn delete_thread(&self, thread_id: String) -> zyris::Result<()>;
+
+    /// Start a new job in a thread. Refused once the thread's plan has come to rest.
+    async fn thread_follow_up(
+        &self,
+        thread_id: String,
+        follow_up: ZThreadFollowUp,
+    ) -> zyris::Result<ZFollowedUp>;
+
+    /// Pin a file to a thread. A `resident` one is handed to every job the thread starts.
+    async fn add_thread_artifact(
+        &self,
+        thread_id: String,
+        file_id: String,
+        resident: bool,
+    ) -> zyris::Result<ZThreadArtifact>;
+
+    /// Unpin a file from a thread. The file itself is kept.
+    async fn remove_thread_artifact(&self, thread_id: String, file_id: String) -> zyris::Result<()>;
+
+    /// Give a thread a plan of its own when it has none, optionally seeded with the goal text.
+    async fn create_goal(&self, thread_id: String, goal: Option<String>) -> zyris::Result<ZGoal>;
+
+    /// Read a plan whole: goal, milestones, next steps, human tasks, verifications.
+    async fn get_goal(&self, goal_id: String) -> zyris::Result<ZGoalDetail>;
+
+    /// Edit a plan's settings. Omitted fields are left alone.
+    async fn update_goal(&self, goal_id: String, update: ZGoalUpdate) -> zyris::Result<ZGoal>;
+
+    /// Delete a plan. The thread and its jobs are kept.
+    async fn delete_goal(&self, goal_id: String) -> zyris::Result<()>;
+
+    /// Replace the goal text. `None` clears it.
+    async fn set_goal(&self, goal_id: String, goal: Option<String>) -> zyris::Result<ZGoal>;
+
+    /// Approve the goal the planner drafted, letting the plan go on to hand over next steps. Read
+    /// `goal` first — that is what is being approved; `send_message` to `planner_session_id` is
+    /// how to ask for changes instead.
+    async fn approve_goal(&self, goal_id: String) -> zyris::Result<ZGoal>;
+
+    async fn create_milestone(
+        &self,
+        goal_id: String,
+        milestone: ZNewMilestone,
+    ) -> zyris::Result<ZMilestone>;
+
+    async fn update_milestone(
+        &self,
+        goal_id: String,
+        milestone_id: String,
+        update: ZMilestoneUpdate,
+    ) -> zyris::Result<ZMilestone>;
+
+    async fn delete_milestone(&self, goal_id: String, milestone_id: String) -> zyris::Result<()>;
+
+    async fn create_next_step(
+        &self,
+        goal_id: String,
+        step: ZNewNextStep,
+    ) -> zyris::Result<ZNextStep>;
+
+    async fn update_next_step(
+        &self,
+        goal_id: String,
+        next_step_id: String,
+        update: ZNextStepUpdate,
+    ) -> zyris::Result<ZNextStep>;
+
+    async fn delete_next_step(&self, goal_id: String, next_step_id: String) -> zyris::Result<()>;
+
+    /// Turn a `proposed` next step into a job. `verification` overrides the step's own flag.
+    /// Refused for a step that is not `proposed`.
+    async fn hand_over_next_step(
+        &self,
+        goal_id: String,
+        next_step_id: String,
+        verification: Option<bool>,
+    ) -> zyris::Result<ZNextStep>;
+
+    /// Turn auto-handover on or off. Turning it on advances the plan at once, as far as it can go.
+    async fn set_auto_handover(&self, goal_id: String, enabled: bool) -> zyris::Result<ZAutoHandover>;
+
+    /// Accept a verification's verdict.
+    async fn accept_verification(
+        &self,
+        goal_id: String,
+        verification_id: String,
+    ) -> zyris::Result<ZVerification>;
+
+    /// Dismiss a verification's verdict.
+    async fn dismiss_verification(
+        &self,
+        goal_id: String,
+        verification_id: String,
+    ) -> zyris::Result<ZVerification>;
+
+    async fn create_human_task(
+        &self,
+        goal_id: String,
+        task: ZNewHumanTask,
+    ) -> zyris::Result<ZHumanTask>;
+
+    /// Close a human task as done or dismissed.
+    async fn resolve_human_task(
+        &self,
+        goal_id: String,
+        task_id: String,
+        resolution: ZHumanTaskResolution,
+    ) -> zyris::Result<ZHumanTask>;
+
+    /// Run a human task's probe now, resolving the task if it passes.
+    async fn recheck_human_task(
+        &self,
+        goal_id: String,
+        task_id: String,
+    ) -> zyris::Result<ZProbeReport>;
+
+    /// Leave a note on a human task for the agent to read. `None` clears it.
+    async fn set_human_task_note(
+        &self,
+        goal_id: String,
+        task_id: String,
+        note: Option<String>,
+    ) -> zyris::Result<ZHumanTask>;
+
+    // Works are legacy: Attacca no longer starts them from its UI, and a planned piece of work is
+    // now a thread (`create_thread`). The tools stay for the works that exist.
 
     /// List the caller's works, newest first.
     async fn list_works(&self, filter: ZWorkFilter) -> zyris::Result<Vec<ZWork>>;
