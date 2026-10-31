@@ -56,10 +56,9 @@
 //! node's own decision, which is why nothing published here makes it.
 //!
 //! Implementations of those declarations are not here on purpose: what a node offers is the
-//! node's decision. Reference ones are separate crates, added beside this one as you want them —
-//! `zyris-fs`, `zyris-terminal`, `zyris-transfer`, `zyris-screen`. `zyris-input` is the exception
-//! and stays git-only: it pins a fork of `enigo`, and crates.io refuses a manifest naming a git
-//! source. See <https://github.com/attacca-cc/zyris-protocol>.
+//! node's decision. Reference ones live in `zyris-capkit`, one feature each, added beside
+//! this one when you want them. It stays git-only for now: its `input` feature pins a fork of
+//! `enigo`, and crates.io refuses a manifest naming a git source. See <https://github.com/attacca-cc/zyris-protocol>.
 //!
 //! # What is where
 //!

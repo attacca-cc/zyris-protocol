@@ -1,15 +1,16 @@
 # zyris-capkit
 
 Reference implementations of the [Zyris](https://github.com/attacca-cc/zyris-protocol) standard
-capability catalogue declared by [`zyris-caps`](https://crates.io/crates/zyris-caps).
+capability catalogue declared by [`zyris-caps`](https://crates.io/crates/zyris-caps), one feature
+each.
 
-| Type | Feature | Implements |
-|---|---|---|
-| `LocalFileIo` | `file-io` *(default)* | `file_io` |
-| `PtyTerminal` | `terminal` *(default)* | `terminal`, over a real pseudo-terminal |
-| `HostScreenCapture`, `HostDisplays` | `screen` | `screen_capture` |
-| `EnigoInput` | `input` | `input` — keyboard and mouse |
-| `transfer` | `transfer`, `transfer-send`, `transfer-listen` | `file_transfer`, `peer_transfer` |
+| Type | Feature | Implements | Details |
+|---|---|---|---|
+| `LocalFileIo` | `file-io` *(default)* | `file_io` | [docs/fs.md](docs/fs.md) |
+| `PtyTerminal` | `terminal` *(default)* | `terminal`, over a real pseudo-terminal | [docs/terminal.md](docs/terminal.md) |
+| `HostScreenCapture`, `HostDisplays` | `screen` | `screen_capture` | [docs/screen.md](docs/screen.md) |
+| `EnigoInput` | `input`, `input-wayland`, `input-libei` | `input` — keyboard and mouse | [docs/input.md](docs/input.md) |
+| `transfer::*` | `transfer`, `transfer-send`, `transfer-listen` | `file_transfer`, `peer_transfer` | [docs/transfer.md](docs/transfer.md) |
 
 The two defaults link against nothing beyond the Rust ecosystem. `screen` and `input` are off
 because they link the display stack — X11, Wayland, PipeWire, D-Bus — and a headless node should not
@@ -25,16 +26,26 @@ stack that makes them.
 A deployment that needs a fence has to enforce one; see the guard in
 [`zyris-code`](https://github.com/attacca-cc/zyris-code) for how the reference client does it.
 
-**This crate is not published.** It is `publish = false`: these are reference implementations,
-and what a node offers is the node's own decision, not something a protocol crate should ship
-by default. It is also what lets the desktop features pin a git fork of `enigo` — nothing on
-crates.io may depend on a git revision, so a published capkit could not have carried them.
+## Not published yet
 
-Depend on it by path or by git if you want the implementations:
+The `input` feature pins a git fork of `enigo`, and crates.io refuses any manifest that names a git
+source — even behind an optional feature. Until that fork is on the registry, depend on this crate
+by git:
 
 ```toml
-zyris-capkit = { git = "https://github.com/attacca-cc/zyris-protocol" }
+zyris-capkit = { git = "https://github.com/attacca-cc/zyris-protocol", features = ["screen"] }
 ```
+
+`zyris-fs`, `zyris-terminal`, `zyris-screen` and `zyris-transfer` on crates.io are the 0.2.0
+releases from before these implementations were merged here. Moving off them:
+
+| Was | Is |
+|---|---|
+| `zyris_fs::LocalFileIo` | `zyris_capkit::LocalFileIo` |
+| `zyris_terminal::PtyTerminal` | `zyris_capkit::PtyTerminal` |
+| `zyris_transfer::*` | `zyris_capkit::transfer::*` (features `transfer`, `transfer-send`, `transfer-listen`) |
+| `zyris_screen::*` | `zyris_capkit::screen::*`, or the root re-exports |
+| `zyris_input::*` | `zyris_capkit::input::*`, or the root re-exports (features `input-wayland`, `input-libei`) |
 
 ## License
 

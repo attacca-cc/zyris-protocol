@@ -22,11 +22,11 @@ jobs:
           shared-key: workspace
           cache-on-failure: true
 
-      # `zyris-screen` and `zyris-input` are workspace members now, so `--workspace` compiles the
-      # display stack here for the first time. `xcap` reaches X11 and the portal, `libwayshot`
-      # reaches Wayland, and `enigo` links `xkbcommon` with a bare `#[link]` and no pkg-config
-      # probe of its own. Before the split these crates were a capkit feature nothing turned on,
-      # which is a polite way of saying nothing had ever compiled them.
+      # `zyris-capkit`'s `screen` and `input` features compile the display stack. `xcap` reaches
+      # X11 and the portal, `libwayshot` reaches Wayland, and `enigo` links `xkbcommon` with a bare
+      # `#[link]` and no pkg-config probe of its own. Neither is a default feature, so every step
+      # below that means to compile them names `zyris-capkit/desktop` — a feature nothing turns on
+      # is a polite way of saying nothing compiles it, which is how this job once ran.
       #
       # **`cargo build` does not prove this list is complete.** A library target stops at an rlib,
       # which records the `-l` flags rather than resolving them; only an executable calls the
@@ -41,7 +41,7 @@ jobs:
             libxkbcommon-dev xvfb
 
       - name: cargo build
-        run: cargo build --workspace
+        run: cargo build --workspace --features zyris-capkit/desktop
 
       # **The other TLS provider, which nothing else compiles.** `--workspace` builds every member
       # with its default features and no provider is one of them; the test step below turns on
@@ -58,19 +58,17 @@ jobs:
       # checked-in .stderr files — they are the reason a toolchain bump can fail this job on its own.
       #
       # **The feature flags are load-bearing, not a nicety.** `--workspace` builds every member with
-      # its *default* features, and nothing turns `zyris-transfer`'s `send`/`listen` on — so a plain
+      # its *default* features, and nothing turns `zyris-capkit`'s `transfer-send`/`transfer-listen` on — so a plain
       # `cargo test --workspace` compiles all five of the file-transfer test files down to nothing
       # and reports `0 tests` for each. That was the state of this job until 2026-08-11: green over a
       # path jail, an undo trail and a TOFU pin that nothing had ever executed. Naming the features
       # here is what makes those tests real.
       #
-      # They read `zyris-transfer/...` rather than `zyris-capkit/...` since the split. A `--features`
-      # flag naming a crate that is not in the workspace is an error, so that rename cannot rot
-      # silently — but a *test target* that no longer exists is skipped, not failed, which is why
-      # the Windows job below moved in the same commit.
+      # A `--features` flag naming a feature that does not exist is an error, so a rename cannot rot
+      # silently — but a *test target* whose `required-features` are off is skipped, not failed.
       #
-      # Every feature that gates tests has to be named. `zyris-screen`'s six tests are the one
-      # exception and they are now compiled and run here: each asks `ScreenBackend::detect()` for a
+      # Every feature that gates tests has to be named, `screen` included. Its tests are compiled
+      # and run here: each asks `ScreenBackend::detect()` for a
       # display first and returns early when there is none, so on a headless runner they pass by
       # doing nothing. That is weaker than it sounds and is on purpose — compiling them is what
       # catches a backend that stopped building, which is the failure this job can actually see.
@@ -86,7 +84,7 @@ jobs:
         # `zyris/enroll` is here so the `facade_probe` example is compiled: it declares
         # `required-features = ["enroll"]`, and a target whose features are not enabled is
         # skipped silently rather than failing — which would make it a guard that guards nothing.
-        run: cargo test --workspace --features zyris-transfer/send,zyris-transfer/listen,zyris/enroll
+        run: cargo test --workspace --features zyris-capkit/transfer-send,zyris-capkit/transfer-listen,zyris-capkit/desktop,zyris/enroll
 
       # **The providerless build, which no other step above runs a single test of.** Everything
       # before this either builds without running (`cargo build`) or unions `zyris/enroll` — and
@@ -136,18 +134,18 @@ jobs:
           ZYRIS_SCREEN_REQUIRE_DISPLAY: "1"
         run: |
           xvfb-run -a --server-args="-screen 0 1920x1080x24 +extension RANDR" \
-            cargo test -p zyris-screen --test screen -- --test-threads=1
+            cargo test -p zyris-capkit --features screen --test screen -- --test-threads=1
 
       # Each transfer feature alone. `--workspace` above unions them, which is exactly the shape
-      # that hid `listen` not compiling without `send`: `transfer/listen.rs` reached
+      # that hid `transfer-listen` not compiling without `transfer-send`: `transfer/listen.rs` reached
       # `super::send::Rendezvous`, so the manifest's claim that the two are independent was false
       # and no build in this repository ever tested it. One line per feature, so the failure names
       # which one.
       - name: cargo build (each transfer feature alone)
         run: |
-          cargo build -p zyris-transfer
-          cargo build -p zyris-transfer --features send
-          cargo build -p zyris-transfer --features listen
+          cargo build -p zyris-capkit --no-default-features --features transfer
+          cargo build -p zyris-capkit --no-default-features --features transfer-send
+          cargo build -p zyris-capkit --no-default-features --features transfer-listen
 
   # Windows is a platform this repo makes claims about and has never run. `Terminal::exec`'s doc
   # tells an agent how to run a PowerShell script without fighting quoting — that sentence *is* the
@@ -171,7 +169,7 @@ jobs:
       # The whole workspace, so a Windows-only compile error surfaces here rather than in whatever
       # a user is trying to do at the time.
       - name: cargo build
-        run: cargo build --workspace
+        run: cargo build --workspace --features zyris-capkit/desktop
 
       - name: cargo test (windows-specific)
-        run: cargo test -p zyris-terminal --test terminal_windows
+        run: cargo test -p zyris-capkit --test terminal_windows

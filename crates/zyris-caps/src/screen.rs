@@ -50,7 +50,7 @@ pub struct Display {
     /// This is not hypothetical, and the silence here is what licensed the bug that added these
     /// sentences: on GNOME's Xwayland at a fractional scale the reported size and the scale come
     /// from two different windowing systems and no factor relates them to the picture, so
-    /// `zyris-screen` reads `wl_output` there rather than deriving.
+    /// `zyris-capkit`'s `screen` reads `wl_output` there rather than deriving.
     ///
     /// Note that "captured" is not always "the panel". macOS renders a scaled Retina mode to an
     /// oversized backing store and hands *that* back, so the picture is larger than the physical

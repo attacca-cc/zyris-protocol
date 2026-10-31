@@ -6,8 +6,8 @@
 //! nothing else.
 //!
 //! There is deliberately no implementation here, and no dependency that touches an operating
-//! system. The reference implementations are separate crates — `zyris-fs`, `zyris-terminal`,
-//! `zyris-transfer`, `zyris-screen`, `zyris-input` — and a node adds whichever it wants.
+//! system. The reference implementations live in `zyris-capkit`, one feature
+//! each, and a node turns on whichever it wants.
 //!
 //! A few items here are not declarations but *contract*: `resolve_under`, `Displays`,
 //! `no_such_display`, `display_scale`. They are what two independent implementations of one
