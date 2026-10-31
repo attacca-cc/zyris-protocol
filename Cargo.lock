@@ -1321,9 +1321,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
-name = "enigo"
+name = "enigo-zyris"
 version = "0.6.1"
-source = "git+https://github.com/ridanit-ruma/enigo-zyris?rev=98edfe35f3400f5e4c92df58840da2e7dfc9d879#98edfe35f3400f5e4c92df58840da2e7dfc9d879"
 dependencies = [
  "ashpd",
  "core-foundation 0.10.1",
@@ -6411,7 +6410,7 @@ dependencies = [
 
 [[package]]
 name = "zyris"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tokio",
  "zyris-caps",
@@ -6421,7 +6420,7 @@ dependencies = [
 
 [[package]]
 name = "zyris-attacca"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "futures-util",
  "schemars",
@@ -6433,19 +6432,35 @@ dependencies = [
 
 [[package]]
 name = "zyris-capkit"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
+ "async-trait",
+ "bytes",
+ "enigo-zyris",
+ "futures-util",
+ "hex",
+ "image",
+ "iroh",
+ "libc",
+ "libwayshot-xcap",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "vt100",
+ "xcap",
+ "zyris-attacca",
  "zyris-caps",
- "zyris-fs",
- "zyris-input",
- "zyris-screen",
- "zyris-terminal",
- "zyris-transfer",
+ "zyris-core",
+ "zyris-p2p",
 ]
 
 [[package]]
 name = "zyris-caps"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "schemars",
  "serde",
@@ -6455,7 +6470,7 @@ dependencies = [
 
 [[package]]
 name = "zyris-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -6482,30 +6497,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "zyris-fs"
-version = "0.2.0"
-dependencies = [
- "bytes",
- "futures-util",
- "tempfile",
- "tokio",
- "zyris-caps",
- "zyris-core",
-]
-
-[[package]]
-name = "zyris-input"
-version = "0.2.0"
-dependencies = [
- "enigo",
- "tokio",
- "zyris-caps",
- "zyris-core",
-]
-
-[[package]]
 name = "zyris-macros"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6518,7 +6511,7 @@ dependencies = [
 
 [[package]]
 name = "zyris-p2p"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6538,7 +6531,7 @@ dependencies = [
 
 [[package]]
 name = "zyris-proto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.0",
  "bytes",
@@ -6549,54 +6542,4 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.19",
-]
-
-[[package]]
-name = "zyris-screen"
-version = "0.2.0"
-dependencies = [
- "image",
- "libwayshot-xcap",
- "tokio",
- "tracing",
- "xcap",
- "zyris-caps",
- "zyris-core",
-]
-
-[[package]]
-name = "zyris-terminal"
-version = "0.2.0"
-dependencies = [
- "bytes",
- "futures-util",
- "libc",
- "portable-pty",
- "tempfile",
- "tokio",
- "vt100",
- "zyris-caps",
- "zyris-core",
-]
-
-[[package]]
-name = "zyris-transfer"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "bytes",
- "futures-util",
- "hex",
- "iroh",
- "libc",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "tracing",
- "zyris-attacca",
- "zyris-caps",
- "zyris-core",
- "zyris-p2p",
 ]

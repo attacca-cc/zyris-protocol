@@ -10,7 +10,7 @@ either peer may call the other, open streams, or change what it offers mid-sessi
 
 ```toml
 [dependencies]
-zyris = { version = "0.2", features = ["full", "tls-ring"] }
+zyris = { version = "0.3", features = ["full", "tls-ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -68,9 +68,8 @@ connection with nothing at compile time to warn you; a build that skipped this g
 `ConnectError::NoTlsProvider` before a socket is opened instead. An application that calls
 `rustls::crypto::CryptoProvider::install_default` itself is believed and needs neither feature.
 
-**Implementations are not here.** The repository's `zyris-capkit` has reference ones and is not
-published: a node decides what it offers, and a crate that pins a git fork of `enigo` could not go
-to crates.io in any case. Depend on it by git when you want them.
+**Implementations are not here.** A node decides what it offers; the reference ones are in
+[`zyris-capkit`](https://crates.io/crates/zyris-capkit), one feature each.
 
 ## A capability
 

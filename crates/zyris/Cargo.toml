@@ -14,9 +14,9 @@ readme = "README.md"
 # `use zyris::Node` names the same type whether a crate reaches it through here or through
 # `zyris-core` directly — the layers below this one do the latter, because a crate cannot depend on
 # something that depends on it.
-zyris-core = { version = "0.2.0", path = "../zyris-core", default-features = false }
-zyris-caps = { version = "0.2.0", path = "../zyris-caps", optional = true }
-zyris-p2p = { version = "0.2.0", path = "../zyris-p2p", optional = true }
+zyris-core = { version = "0.3.0", path = "../zyris-core", default-features = false }
+zyris-caps = { version = "0.3.0", path = "../zyris-caps", optional = true }
+zyris-p2p = { version = "0.3.0", path = "../zyris-p2p", optional = true }
 
 [features]
 # The same default as `zyris-core`: a node that can dial and name itself. Nothing above the core
@@ -46,8 +46,8 @@ p2p = ["dep:zyris-p2p"]
 
 # Every layer this crate has a module for, plus enrollment. **The reference implementations are not
 # one of them and never will be**: what a node offers is the node's decision, so a node that wants
-# `PtyTerminal` or `LocalFileIo` adds `zyris-terminal` or `zyris-fs` beside this crate, the way
-# `ratatui-crossterm` is added beside `ratatui`.
+# `PtyTerminal` or `LocalFileIo` adds `zyris-capkit` beside this crate with the features it wants,
+# the way `ratatui-crossterm` is added beside `ratatui`.
 #
 # **This is the line that costs a C compiler.** `enroll` is `["dep:reqwest", "tls-ring"]` one layer
 # down, so `full` names a TLS provider whether or not you meant to, and `p2p` reaches one again
