@@ -23,7 +23,7 @@ zyris = { git = "https://github.com/attacca-cc/zyris-protocol", features = ["cap
 **Implementations live in `zyris-capkit`, one feature each.** The catalogue says what a `terminal`
 or a `file_io` *is*; what a node offers is the node's own decision, so nothing above pulls an
 implementation in. Add `zyris-capkit` and turn on the features you want — `file-io`, `terminal`,
-`transfer`, `screen`, `input`. It is git-only for now, because of the `enigo` fork `input` pins.
+`transfer`, `screen`, `input`.
 
 `default` is a node that can announce, accept and name itself, and costs what `zyris-core` alone
 costs — a Rust toolchain and nothing else, no C compiler. **It cannot reach a `wss://` server**:
@@ -71,7 +71,7 @@ The whole of that — capability, token, connection — is one runnable file:
 | [`zyris-proto`](crates/zyris-proto) | `zyris::proto` | Wire types only: envelopes, frames, the handshake, datums and blobs. No I/O, no async. |
 | [`zyris-macros`](crates/zyris-macros) | `zyris::capability` | The `#[zyris::capability]` proc-macro. Not a direct dependency. |
 | [`zyris-caps`](crates/zyris-caps) | `zyris::caps` | The standard capability catalogue — `terminal`, `file_io`, `input`, `screen_capture`, `browser_chrome`, `file_transfer`. Declarations only: no tokio, no OS dependencies, cheap for a client to depend on. |
-| [`zyris-capkit`](crates/zyris-capkit) | — | The reference implementations, one feature each: `file-io` (`LocalFileIo`), `terminal` (`PtyTerminal`), `transfer` (`file_transfer`/`peer_transfer`), `screen` (`HostScreenCapture`), `input` (`EnigoInput`). **Not published yet**: `input` pins a git fork of `enigo`, and crates.io refuses a manifest that names a git source. |
+| [`zyris-capkit`](crates/zyris-capkit) | — | The reference implementations, one feature each: `file-io` (`LocalFileIo`), `terminal` (`PtyTerminal`), `transfer` (`file_transfer`/`peer_transfer`), `screen` (`HostScreenCapture`), `input` (`EnigoInput`). |
 | [`zyris-attacca`](crates/zyris-attacca) | — | The `attacca_api` capability: the one surface that runs the other way, announced by the server rather than by a node. Named directly rather than reached through `zyris`: Attacca is one deployment, and the protocol's face does not carry it. |
 | [`zyris-p2p`](crates/zyris-p2p) | `zyris::p2p` | Transport that carries Zyris over a direct node-to-node connection. |
 

@@ -9,9 +9,8 @@ crate is the trait, the descriptor and the generated client for each capability,
 *calls* these tools is cheap to build.
 
 Reference implementations live in
-[`zyris-capkit`](https://github.com/attacca-cc/zyris-protocol/tree/main/crates/zyris-capkit), one
-feature per capability, and a node turns on the ones it serves. It is git-only for now, because its
-`input` feature pins a fork of `enigo`.
+[`zyris-capkit`](https://crates.io/crates/zyris-capkit), one feature per capability, and a node
+turns on the ones it serves.
 
 Re-exported as `zyris::caps` when [`zyris`](https://crates.io/crates/zyris) is built with the `caps`
 feature; a node that depends on that crate does not need this one by name.

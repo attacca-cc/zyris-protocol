@@ -14,9 +14,9 @@ readme = "README.md"
 # `use zyris::Node` names the same type whether a crate reaches it through here or through
 # `zyris-core` directly — the layers below this one do the latter, because a crate cannot depend on
 # something that depends on it.
-zyris-core = { version = "0.2.0", path = "../zyris-core", default-features = false }
-zyris-caps = { version = "0.2.0", path = "../zyris-caps", optional = true }
-zyris-p2p = { version = "0.2.0", path = "../zyris-p2p", optional = true }
+zyris-core = { version = "0.3.0", path = "../zyris-core", default-features = false }
+zyris-caps = { version = "0.3.0", path = "../zyris-caps", optional = true }
+zyris-p2p = { version = "0.3.0", path = "../zyris-p2p", optional = true }
 
 [features]
 # The same default as `zyris-core`: a node that can dial and name itself. Nothing above the core

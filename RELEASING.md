@@ -1,6 +1,6 @@
 # Releasing
 
-Seven crates go to crates.io from this workspace and one does not.
+Eight crates go to crates.io from this workspace, all of them.
 
 ## What publishes
 
@@ -10,35 +10,30 @@ Seven crates go to crates.io from this workspace and one does not.
 | `zyris-macros` | the `#[zyris::capability]` proc-macro |
 | `zyris-core` | the node runtime and client |
 | `zyris-caps` | the standard capability declarations — no OS, no runtime |
+| `zyris-capkit` | the reference implementations, one feature each |
 | `zyris-p2p` | node-to-node QUIC transport |
 | `zyris-attacca` | the `attacca_api` declaration |
 | `zyris` | the face — `cargo add zyris` |
 
-**`zyris-capkit` carries `publish = false`.** It holds every reference implementation, one feature
-each, and its `input` feature pins
-[a fork of `enigo`](https://github.com/ridanit-ruma/enigo-zyris) carrying two patches upstream does
-not have. An optional dependency still counts: the way out is getting that fork onto the registry,
-upstream or under a name of its own, not working around the rule.
-
 `zyris-fs`, `zyris-terminal`, `zyris-transfer` and `zyris-screen` were published at 0.2.0 before
-the implementations were merged back into `zyris-capkit`. They are no longer in this workspace and
-will not get another release.
+the implementations were merged into `zyris-capkit`. They are no longer in this workspace and will
+not get another release.
 
-**`publish = false` is doing that work, and nothing else is.** crates.io does *not* refuse a
-manifest naming a git source when the dependency also carries a `version` — cargo packages it and
-**silently drops the `git` and `rev`**. Measured with a throwaway crate carrying the same
-enigo line: `cargo package --no-verify` succeeded and the packaged manifest named upstream
-`enigo 0.6.1`. So **never pass `--no-verify` to a real publish** — the verification build is what
-would have caught it, and the opt-out is the only other thing standing there.
+**No git dependencies, and `cargo package` will not tell you if one appears.** crates.io does not
+refuse a manifest naming a git source when the dependency also carries a `version` — cargo packages
+it and **silently drops the `git` and `rev`**, resolving the registry crate of that name instead.
+That is how `zyris-capkit`'s `input` would have shipped upstream `enigo` without the two patches it
+needs, which is why the fork is published as
+[`enigo-zyris`](https://github.com/ridanit-ruma/enigo-zyris) and depended on from the registry. So
+**never pass `--no-verify` to a real publish**.
 
-`every_crate_that_says_it_publishes_can` in `crates/zyris/tests/crate_boundary.rs` holds both halves
-of that: no crate without the opt-out reaches a git checkout, and `zyris-capkit` still reaches one —
-so if the fork ever lands upstream, that test fails and tells you to drop the opt-out.
+`every_crate_that_says_it_publishes_can` in `crates/zyris/tests/crate_boundary.rs` walks every
+member's graph with all features on and fails if any of them reaches a git checkout.
 
 ## Rehearse
 
 ```bash
-cargo package --workspace --exclude zyris-capkit
+cargo package --workspace
 ```
 
 Every crate is packaged against the ones beside it, which is the only way to rehearse before any of
@@ -52,7 +47,7 @@ which is what catches a file the manifest forgot to include.
 ## Publish
 
 ```bash
-cargo publish --workspace --exclude zyris-capkit
+cargo publish --workspace
 ```
 
 Cargo works out the order and waits for the index between crates. **Prefer this over publishing one
@@ -61,7 +56,7 @@ crate at a time**, for the reason the next paragraph is about.
 If you do run them one at a time, this is the order, and it is not the one the layering suggests:
 
 ```text
-zyris-proto  zyris-macros  zyris-core  zyris-caps  zyris-p2p  zyris-attacca  zyris
+zyris-proto  zyris-macros  zyris-core  zyris-caps  zyris-p2p  zyris-attacca  zyris  zyris-capkit
 ```
 
 **A crate with optional intra-workspace dependencies goes after them anyway.** Cargo resolves an
@@ -82,7 +77,7 @@ So the rule is: anything naming an intra-workspace crate goes after it, `optiona
 
 **Not supportable as written, and the reason is in the manifests.** Every intra-workspace dependency
 here is the `version` + `path` form — `zyris-attacca/Cargo.toml` says
-`zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core" }`. Cargo strips `path`
+`zyris = { version = "0.3.0", package = "zyris-core", path = "../zyris-core" }`. Cargo strips `path`
 when the crate comes from the registry and keeps it when the crate comes from git. So a consumer who
 takes `zyris` from crates.io and `zyris-capkit` from git gets `zyris-core` and `zyris-caps` twice,
 from two different sources, and the error names the same type on both sides of a trait bound it
@@ -133,5 +128,5 @@ rotation, and the `input-libei` backend).
 ## Version
 
 One `version` in `[workspace.package]`, so every crate moves together. Bump it there, and remember
-the `version = "0.2.0"` on each intra-workspace dependency line — those are what a published crate
+the `version = "0.3.0"` on each intra-workspace dependency line — those are what a published crate
 resolves against, and they do not follow the workspace field.

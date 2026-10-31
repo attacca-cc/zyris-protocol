@@ -6,10 +6,6 @@
 //! any manifest whose graph names a git source, so a git dependency added three crates down turns a
 //! publishable crate unpublishable with nothing at compile time to say so. Before the split that
 //! was a name check against one crate; now it is a property of every member, checked by walking.
-//!
-//! `zyris-capkit` is the single expected exception and is named as one. Its `input` feature pins a
-//! fork of `enigo` carrying two patches upstream does not have, and until that fork is on the
-//! registry the crate cannot go there either.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -193,20 +189,6 @@ fn nothing_the_face_links_comes_from_a_git_checkout() {
 fn every_crate_that_says_it_publishes_can() {
     for (member, publishes) in members() {
         if !publishes {
-            // A crate that says `publish = false` is out of scope here — but the *reason* is worth
-            // holding on to. `zyris-capkit` opts out because it pins a fork of `enigo`, and if that
-            // fork ever lands upstream the opt-out becomes a crate withheld for no reason. So the
-            // reason is asserted rather than trusted: no git source left means it is time to
-            // publish this one too.
-            if member == "zyris-capkit" {
-                let reaches_git =
-                    linked_from(&member).values().any(|source| source.starts_with("git+"));
-                assert!(
-                    reaches_git,
-                    "zyris-capkit no longer reaches a git checkout, so the reason it carries \
-                     `publish = false` is gone — drop the opt-out and let it publish"
-                );
-            }
             continue;
         }
 
@@ -277,14 +259,5 @@ fn the_face_does_not_name_one_deployments_hub() {
          hub. `cargo tree -p {} --all-features -i zyris-attacca` names the path.",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_NAME")
-    );
-}
-
-#[test]
-fn the_face_does_not_advertise_a_crates_io_page_that_will_never_exist() {
-    let readme = file("zyris/README.md");
-    assert!(
-        !readme.contains("crates.io/crates/zyris-capkit"),
-        "the README links a crates.io page for the one crate that cannot be published"
     );
 }

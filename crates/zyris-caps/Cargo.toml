@@ -16,7 +16,7 @@ categories = ["network-programming", "api-bindings"]
 schemars.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-zyris ={ version = "0.2.0", package = "zyris-core", path = "../zyris-core", default-features = false }
+zyris ={ version = "0.3.0", package = "zyris-core", path = "../zyris-core", default-features = false }
 
 [package.metadata.docs.rs]
 all-features = true

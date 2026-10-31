@@ -10,8 +10,8 @@ is one answer to both — `LocalPeerTransfer` for the exchange, `LocalFileTransf
 
 ```toml
 [dependencies]
-zyris = { version = "0.2", features = ["caps"] }
-zyris-capkit = { git = "https://github.com/attacca-cc/zyris-protocol", default-features = false, features = ["transfer"] }
+zyris = { version = "0.3", features = ["caps"] }
+zyris-capkit = { version = "0.3", default-features = false, features = ["transfer"] }
 ```
 
 ```rust

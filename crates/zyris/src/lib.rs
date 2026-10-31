@@ -5,7 +5,7 @@
 //! capabilities the server announces back. This crate is the whole stack behind one dependency:
 //!
 //! ```toml
-//! zyris = { version = "0.2", features = ["full", "tls-ring"] }
+//! zyris = { version = "0.3", features = ["full", "tls-ring"] }
 //! ```
 //!
 //! ```no_run
@@ -57,8 +57,7 @@
 //!
 //! Implementations of those declarations are not here on purpose: what a node offers is the
 //! node's decision. Reference ones live in `zyris-capkit`, one feature each, added beside
-//! this one when you want them. It stays git-only for now: its `input` feature pins a fork of
-//! `enigo`, and crates.io refuses a manifest naming a git source. See <https://github.com/attacca-cc/zyris-protocol>.
+//! this one when you want them. See <https://github.com/attacca-cc/zyris-protocol>.
 //!
 //! # What is where
 //!

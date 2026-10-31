@@ -26,18 +26,14 @@ stack that makes them.
 A deployment that needs a fence has to enforce one; see the guard in
 [`zyris-code`](https://github.com/attacca-cc/zyris-code) for how the reference client does it.
 
-## Not published yet
-
-The `input` feature pins a git fork of `enigo`, and crates.io refuses any manifest that names a git
-source — even behind an optional feature. Until that fork is on the registry, depend on this crate
-by git:
+## Moving off the per-capability crates
 
 ```toml
-zyris-capkit = { git = "https://github.com/attacca-cc/zyris-protocol", features = ["screen"] }
+zyris-capkit = { version = "0.3", features = ["screen"] }
 ```
 
-`zyris-fs`, `zyris-terminal`, `zyris-screen` and `zyris-transfer` on crates.io are the 0.2.0
-releases from before these implementations were merged here. Moving off them:
+`zyris-fs`, `zyris-terminal`, `zyris-screen` and `zyris-transfer` 0.2.0 on crates.io are the
+releases from before these implementations were merged here, and get no further versions.
 
 | Was | Is |
 |---|---|

@@ -94,19 +94,16 @@ needs nothing further at link time, though at run time it needs a session offeri
 toolchain — on macOS the process needs Accessibility permission instead, and the first call opens
 the system prompt asking for it.
 
-## Why `zyris-capkit` is not published
+## The `enigo` fork
 
-`enigo` is depended on as a git fork carrying two patches that are not
-upstream — per-output absolute motion for `wlr-virtual-pointer`, and Shift for level-1 keysyms on
-libei, without which `!` arrives as `1` under GNOME — and crates.io refuses any crate whose
-manifest names a git source, even behind an optional feature. Getting those two patches upstream,
-or publishing the fork under a name of its own, is the way out; a `[patch]`
-section here or downstream is not, because it builds on exactly one machine.
-
-Depend on it by git in the meantime:
+`enigo` comes from [`enigo-zyris`](https://crates.io/crates/enigo-zyris), a fork carrying two patches
+that are not upstream — per-output absolute motion for `wlr-virtual-pointer`, and Shift for level-1
+keysyms on libei, without which `!` arrives as `1` under GNOME. Fixes belong in
+[that repository](https://github.com/ridanit-ruma/enigo-zyris); a `[patch]` section here or
+downstream builds on exactly one machine.
 
 ```toml
-zyris-capkit = { git = "https://github.com/attacca-cc/zyris-protocol", default-features = false, features = ["input"] }
+zyris-capkit = { version = "0.3", default-features = false, features = ["input"] }
 ```
 
 ## License

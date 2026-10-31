@@ -11,8 +11,8 @@ Windows — or, in a wlroots Wayland session, `wl_output` and `zwlr_screencopy` 
 
 ```toml
 [dependencies]
-zyris = { version = "0.2", features = ["caps"] }
-zyris-capkit = { git = "https://github.com/attacca-cc/zyris-protocol", default-features = false, features = ["screen"] }
+zyris = { version = "0.3", features = ["caps"] }
+zyris-capkit = { version = "0.3", default-features = false, features = ["screen"] }
 ```
 
 ```rust

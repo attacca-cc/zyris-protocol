@@ -19,8 +19,8 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "macros", "time", "io-util", "fs"] }
 tracing.workspace = true
-zyris = { version = "0.2.0", package = "zyris-core", path = "../zyris-core" }
-zyris-proto = { version = "0.2.0", path = "../zyris-proto" }
+zyris = { version = "0.3.0", package = "zyris-core", path = "../zyris-core" }
+zyris-proto = { version = "0.3.0", path = "../zyris-proto" }
 
 [dev-dependencies]
 async-trait.workspace = true

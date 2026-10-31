@@ -66,12 +66,10 @@
 //! `org.freedesktop.portal.RemoteDesktop` portal to do anything at run time. Windows and macOS
 //! need nothing beyond a Rust toolchain.
 //!
-//! # Why `zyris-capkit` is not published
+//! # The `enigo` fork
 //!
-//! `enigo` is depended on as a git fork carrying two patches that are not upstream, and crates.io
-//! refuses any crate whose manifest names a git source — even behind an optional feature. Until
-//! the fork is on crates.io under a name of its own, the whole crate stays `publish = false`; see
-//! the comment on the dependency in `Cargo.toml`.
+//! `enigo` comes from [`enigo-zyris`](https://crates.io/crates/enigo-zyris), a fork carrying two
+//! patches that are not upstream; see the comment on the dependency in `Cargo.toml`.
 
 mod chord;
 mod display;
