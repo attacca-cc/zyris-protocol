@@ -173,6 +173,18 @@ impl AttaccaApi for StubRendezvous {
     async fn peer_publish(&self, _endpoint_id: String, _addrs: Vec<String>) -> Result<()> {
         unused()
     }
+    async fn peer_challenge(&self) -> Result<String> {
+        unused()
+    }
+    async fn peer_publish_signed(
+        &self,
+        _endpoint_id: String,
+        _addrs: Vec<String>,
+        _nonce: String,
+        _signature: String,
+    ) -> Result<()> {
+        unused()
+    }
     async fn peer_list(&self) -> Result<Vec<ZPeerEntry>> {
         unused()
     }

@@ -539,6 +539,24 @@ impl AttaccaApi for StubApi {
         Ok(())
     }
 
+    async fn peer_challenge(&self) -> zyris::Result<String> {
+        Ok("00".repeat(32))
+    }
+
+    async fn peer_publish_signed(
+        &self,
+        endpoint_id: String,
+        _addrs: Vec<String>,
+        nonce: String,
+        signature: String,
+    ) -> zyris::Result<()> {
+        if endpoint_id == "ed25519:my-endpoint" && nonce == "00".repeat(32) && signature == "sig" {
+            Ok(())
+        } else {
+            Err(zyris::WireError::invalid_params("bad proof"))
+        }
+    }
+
     /// Echoes the requested path back on the answer, which is what a node calling this with the
     /// path a user named should get: the same path it asked with, not one the server substituted.
     async fn peer_lookup(&self, path: String) -> zyris::Result<ZPeerAddr> {
@@ -868,7 +886,7 @@ fn descriptor_matches_the_reserved_name() {
     let descriptor = attacca_api_capability();
     assert_eq!(descriptor.name, ATTACCA_API_CAPABILITY);
     assert_eq!(descriptor.version, 1);
-    assert_eq!(descriptor.tools.len(), 69);
+    assert_eq!(descriptor.tools.len(), 71);
     // A credential exists to create nodes, so nothing on this surface registers, lists or deletes
     // one any more. A deployment still serving these would be one this crate cannot call.
     for gone in ["register_node", "list_nodes", "delete_node"] {
@@ -908,6 +926,8 @@ fn rendezvous_tools_are_in_the_descriptor() {
     let descriptor = attacca_api_capability();
     for name in [
         "peer_publish",
+        "peer_challenge",
+        "peer_publish_signed",
         "peer_lookup",
         "peer_list",
         "peer_relay",
@@ -1386,6 +1406,27 @@ fn peers_write_scope_exists() {
     assert_eq!(scope.as_str(), "peers:write");
     assert_eq!(ZScope::from_str("peers:write"), Some(ZScope::PeersWrite));
     assert!(ZScope::ALL.contains(&ZScope::PeersWrite));
+}
+
+/// The nonce the server issues and the signed publish that answers it both cross the wire intact.
+#[tokio::test]
+async fn peer_challenge_and_signed_publish_cross_the_wire() {
+    let api = client().await;
+
+    let nonce = api.peer_challenge().await.unwrap();
+    assert_eq!(nonce, "00".repeat(32));
+    api.peer_publish_signed(
+        "ed25519:my-endpoint".into(),
+        vec!["198.51.100.9:4433".into()],
+        nonce.clone(),
+        "sig".into(),
+    )
+    .await
+    .unwrap();
+    assert!(api
+        .peer_publish_signed("ed25519:my-endpoint".into(), vec![], nonce, "wrong".into())
+        .await
+        .is_err());
 }
 
 /// The lookup key is the node path, not `node_id`: this is what a node calling

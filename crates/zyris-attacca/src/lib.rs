@@ -1736,6 +1736,27 @@ pub trait AttaccaApi {
     /// different one is rejected — so the server never becomes a place that quietly swaps the key.
     async fn peer_publish(&self, endpoint_id: String, addrs: Vec<String>) -> zyris::Result<()>;
 
+    /// Issue a one-time nonce for [`AttaccaApi::peer_publish_signed`]: 32 random bytes, hex.
+    /// `peers:write`.
+    ///
+    /// Added within version 1, so an older deployment answers `capability_not_announced` or an
+    /// unknown-tool error; a node falls back to `peer_publish`.
+    async fn peer_challenge(&self) -> zyris::Result<String>;
+
+    /// `peer_publish` plus proof that the caller holds the key: `signature` is the hex ed25519
+    /// signature, by `endpoint_id`'s secret key, over `zyris-peer-publish-v1:` followed by `nonce`
+    /// (see `zyris_p2p::publish_proof`). The nonce comes from `peer_challenge`. `peers:write`.
+    ///
+    /// Added within version 1, so an older deployment answers `capability_not_announced` or an
+    /// unknown-tool error; a node falls back to `peer_publish`.
+    async fn peer_publish_signed(
+        &self,
+        endpoint_id: String,
+        addrs: Vec<String>,
+        nonce: String,
+        signature: String,
+    ) -> zyris::Result<()>;
+
     /// Ask for another node's address on the same account. `peers:write`.
     ///
     /// **The lookup key is the node path** — `laptop/zyris-code/myrepo`, a

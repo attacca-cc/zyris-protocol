@@ -10,6 +10,7 @@ pub mod endpoint;
 pub mod frame;
 pub mod key;
 pub mod peer;
+pub mod publish_proof;
 pub mod tls;
 pub mod tofu;
 pub mod transport;
